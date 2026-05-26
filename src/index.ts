@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 import { config } from './config';
 import { router } from './api/router';
 import { prisma } from './db';
+import { startIndexerService } from './indexer/indexer';
 
 const app = express();
 
@@ -28,6 +29,8 @@ app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
 async function main() {
   await prisma.$connect();
+  startIndexerService().catch((err) => console.error('Indexer service failed:', err));
+
   app.listen(config.port, () => {
     console.log(`🚀 Soroban Explorer API running on port ${config.port}`);
   });

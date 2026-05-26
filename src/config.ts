@@ -6,6 +6,7 @@ export const config = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
   stellarNetwork: process.env.STELLAR_NETWORK ?? 'testnet',
   stellarRpcUrl: process.env.STELLAR_RPC_URL ?? 'https://soroban-testnet.stellar.org',
+  stellarRpcWsUrl: process.env.STELLAR_RPC_WS_URL ?? process.env.STELLAR_RPC_URL?.replace(/^http/, 'ws') ?? 'wss://soroban-testnet.stellar.org',
   horizonUrl: process.env.HORIZON_URL ?? 'https://horizon-testnet.stellar.org',
   networkPassphrase: process.env.NETWORK_PASSPHRASE ?? 'Test SDF Network ; September 2015',
   indexerStartLedger: parseInt(process.env.INDEXER_START_LEDGER ?? '0'),
