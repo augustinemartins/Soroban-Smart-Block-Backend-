@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../db';
 import { z } from 'zod';
 import { fetchContractSpec } from '../indexer/wasm-spec';
+import { abiRouter } from './abi';
 
 export const contractRouter = Router();
 
@@ -27,6 +28,9 @@ contractRouter.get('/:address/spec', async (req: Request, res: Response) => {
   if (!schema) return res.status(404).json({ error: 'Spec not found or contract has no embedded spec' });
   res.json(schema);
 });
+
+// /contracts/:address/abi — CRUD ABI management
+contractRouter.use('/:address/abi', abiRouter);
 
 // GET /contracts/:address
 contractRouter.get('/:address', async (req: Request, res: Response) => {
