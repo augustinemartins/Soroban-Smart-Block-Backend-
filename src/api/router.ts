@@ -5,6 +5,7 @@ import { contractRouter } from './contracts';
 import { walletRouter } from './wallets';
 import { tokenRouter } from './tokens';
 import { renderRouter } from './render';
+import { simulateRouter } from './simulate';
 
 export const router = Router();
 
@@ -14,3 +15,4 @@ router.use('/contracts', contractRouter);
 router.use('/wallets', walletRouter);
 router.use('/tokens', tokenRouter);
 router.use('/render', renderRouter);
+router.use('/simulate', simulateRouter);
