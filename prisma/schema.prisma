@@ -9,18 +9,37 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Ledger (block) — one row per closed ledger.
+// sequence is the natural PK; closeTime enables timestamp-range queries.
+model Ledger {
+  sequence     Int      @id                // ledger sequence number (block number)
+  hash         String   @unique            // ledger hash
+  closeTime    DateTime                    // ledger close timestamp
+  txCount      Int      @default(0)        // number of transactions in this ledger
+  createdAt    DateTime @default(now())
+
+  transactions Transaction[]
+  events       Event[]
+
+  @@index([sequence])                      // sub-second lookup by ledger number
+  @@index([closeTime])                     // range queries by timestamp
+}
+
 model Contract {
-  id          String   @id @default(cuid())
-  address     String   @unique
-  name        String?
-  description String?
-  abi         Json?    // ABI-like metadata: functions, events, types
-  isToken     Boolean  @default(false)
-  tokenSymbol String?
-  tokenName   String?
-  tokenDecimals Int?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  address            String   @unique
+  name               String?
+  description        String?
+  abi                Json?    // ABI-like metadata: functions, events, types
+  functionSignatures Json?    // decoded function signatures: [{ name, inputs, outputs }]
+  isToken            Boolean  @default(false)
+  tokenSymbol        String?
+  tokenName          String?
+  tokenDecimals      Int?
+  wasmHash           String?  // fuzzy hash of compiled Wasm bytecode for similarity detection
+  isVerified         Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   transactions Transaction[]
   events       Event[]
@@ -31,7 +50,7 @@ model Contract {
 model Transaction {
   id              String   @id @default(cuid())
   hash            String   @unique
-  ledger          Int
+  ledgerSequence  Int                      // FK → Ledger.sequence
   ledgerCloseTime DateTime
   sourceAccount   String
   contractAddress String?
@@ -41,15 +60,24 @@ model Transaction {
   status          String   // success | failed
   humanReadable   String?  // "Address X swapped 100 USDC → 98.7 XLM"
   feeCharged      String?
+  sorobanResources Json?   // #48: CPU, memory, ledger footprint metrics
+  failureReason   String?  // #49: human-readable failure explanation
   createdAt       DateTime @default(now())
 
+  ledger   Ledger    @relation(fields: [ledgerSequence], references: [sequence])
   contract Contract? @relation(fields: [contractAddress], references: [address])
   events   Event[]
 
-  @@index([hash])
+  @@index([hash])                          // sub-second lookup by tx hash
+  @@index([ledgerSequence])               // sub-second lookup by ledger number
   @@index([sourceAccount])
   @@index([contractAddress])
-  @@index([ledger])
+  @@index([status])
+  // Composite indexes for cursor-based pagination (ledgerSequence DESC, id DESC)
+  @@index([contractAddress, ledgerSequence, id])
+  @@index([sourceAccount, ledgerSequence, id])
+  @@index([status, ledgerSequence, id])
+  @@index([ledgerSequence, id])
 }
 
 model Event {
@@ -57,20 +85,46 @@ model Event {
   transactionHash String
   contractAddress String
   eventType       String   // transfer | swap | mint | burn | custom
-  topics          Json     // raw topics
-  data            Json     // raw data
+  topicSymbol     String?  // first topic decoded as symbol (e.g. "transfer", "mint_pass")
+  topics          Json     // raw topics (base64 XDR array)
+  data            Json     // raw data (base64 XDR)
   decoded         Json?    // human-readable decoded event
-  ledger          Int
+  ledgerSequence  Int                      // FK → Ledger.sequence
   ledgerCloseTime DateTime
   createdAt       DateTime @default(now())
 
+  ledger      Ledger      @relation(fields: [ledgerSequence], references: [sequence])
   transaction Transaction @relation(fields: [transactionHash], references: [hash])
   contract    Contract    @relation(fields: [contractAddress], references: [address])
 
   @@index([transactionHash])
   @@index([contractAddress])
   @@index([eventType])
-  @@index([ledger])
+  @@index([topicSymbol])
+  @@index([ledgerSequence])
+  // Heavy-use composite: filter by contract + topic symbol (event name)
+  @@index([contractAddress, topicSymbol])
+  // Cursor-based pagination: contract + ledger desc
+  @@index([contractAddress, ledgerSequence, id])
+  // Filter by contract + event type + ledger for time-range queries
+  @@index([contractAddress, eventType, ledgerSequence])
+}
+
+// Custom event symbol → template bindings submitted by verified project creators
+model EventDefinition {
+  id              String   @id @default(cuid())
+  contractAddress String
+  // The event topic symbol this binding applies to, e.g. "mint_pass"
+  topicSymbol     String
+  // Mustache-style template, e.g. "Minted pass #{{data.id}} to {{data.owner}}"
+  humanTemplate   String
+  // Who submitted this definition (API key or creator identifier)
+  submittedBy     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([contractAddress, topicSymbol])
+  @@index([contractAddress])
 }
 
 model SessionAuthorization {
@@ -93,7 +147,148 @@ model SessionAuthorization {
 }
 
 model IndexerState {
-  id            String   @id @default("singleton")
-  lastLedger    Int      @default(0)
-  updatedAt     DateTime @updatedAt
+  id         String   @id @default("singleton")
+  lastLedger Int      @default(0)
+  updatedAt  DateTime @updatedAt
+}
+
+// Bidirectional mapping: classic Stellar asset ↔ SAC contract address
+model SacMapping {
+  id           String   @id @default(cuid())
+  // Classic asset fields
+  assetCode    String   // e.g. "USDC"
+  assetIssuer  String?  // null for XLM (native)
+  assetType    String   // "native" | "credit_alphanum4" | "credit_alphanum12"
+  // Soroban side
+  sacAddress   String   @unique  // derived C-address of the SAC contract
+  // Metadata
+  firstSeenLedger Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ammPools     AmmPool[]
+
+  @@unique([assetCode, assetIssuer])
+  @@index([sacAddress])
+  @@index([assetCode])
+}
+
+// AMM pool that uses one or more SAC-wrapped assets
+model AmmPool {
+  id              String   @id @default(cuid())
+  poolAddress     String   @unique  // Soroban contract address of the pool
+  poolType        String   @default("constant_product")  // constant_product | stable
+  // The two assets in the pool (at least one is a SAC)
+  assetAAddress   String   // SAC address or native token address
+  assetBAddress   String
+  // Reverse links to SacMapping (nullable — one side may be a non-SAC token)
+  sacMappingAId   String?
+  sacMappingBId   String?
+  sacMappingA     SacMapping? @relation(fields: [sacMappingAId], references: [id])
+  firstSeenLedger Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([assetAAddress])
+  @@index([assetBAddress])
+}
+
+model VerificationJob {
+  id              String   @id @default(cuid())
+  contractAddress String?  // on-chain address to compare against
+  toolchain       String   @default("soroban-cli@0.9.4") // pinned toolchain version
+  status          String   @default("pending") // pending | compiling | verified | failed
+  uploadedHash    String?  // SHA-256 of uploaded archive
+  onChainWasmHash String?  // hash fetched from RPC
+  compiledWasmHash String? // hash of compiled output
+  matched         Boolean?
+  errorMsg        String?
+  logs            String?  // compiler stdout/stderr
+  sourceFiles     Json?    // extracted source files: [{ path, content }]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([contractAddress])
+  @@index([status])
+}
+
+model FailedItem {
+  id          String   @id @default(cuid())
+  itemType    String   // "transaction" | "event"
+  itemId      String   // tx hash or event id
+  ledger      Int
+  rawXdr      String?  // raw XDR that failed to decode
+  errorMsg    String
+  errorStack  String?
+  context     Json?    // extra context (topics, data, etc.)
+  retryCount  Int      @default(0)
+  dead        Boolean  @default(false)  // true = max retries exceeded
+  createdAt   DateTime @default(now())
+  lastTriedAt DateTime @default(now())
+
+  @@index([itemType, dead])
+  @@index([ledger])
+}
+
+// Storage efficiency: tracks allocated footprint bytes vs actual data bytes per tx
+model StorageEfficiencyLog {
+  id              String   @id @default(cuid())
+  transactionHash String   @unique
+  contractAddress String?
+  ledgerSequence  Int
+  // Footprint (what the tx declared it would read/write)
+  readOnlyKeys    Int      @default(0)   // number of read-only footprint keys
+  readWriteKeys   Int      @default(0)   // number of read-write footprint keys
+  footprintBytes  Int      @default(0)   // total allocated byte budget
+  // Actual usage
+  actualReadBytes  Int     @default(0)   // bytes actually read
+  actualWriteBytes Int     @default(0)   // bytes actually written
+  // Derived efficiency metrics
+  unusedBytes     Int      @default(0)   // footprintBytes - (actualReadBytes + actualWriteBytes)
+  efficiencyPct   Float    @default(0)   // (actual / footprint) * 100
+  createdAt       DateTime @default(now())
+
+  @@index([contractAddress])
+  @@index([ledgerSequence])
+  @@index([efficiencyPct])
+}
+
+// Async CSV export jobs
+model ExportJob {
+  id          String   @id @default(cuid())
+  status      String   @default("pending")  // pending | running | done | failed
+  exportType  String   // "transactions" | "events"
+  filters     Json?    // serialised query filters (contract, account, ledgerMin, etc.)
+  filePath    String?  // path to generated CSV file once done
+  rowCount    Int?     // number of rows exported
+  errorMsg    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Signer state snapshot per transaction for multi-sig smart accounts
+model SignerSnapshot {
+  id              String   @id @default(cuid())
+  transactionHash String   @unique
+  contractAddress String   // the smart-account contract
+  ledgerSequence  Int
+  // Threshold configuration at time of tx
+  lowThreshold    Int      @default(0)
+  medThreshold    Int      @default(0)
+  highThreshold   Int      @default(0)
+  // Signer participation
+  signers         Json     // array of { key, weight, signed: bool }
+  weightAchieved  Int      @default(0)   // sum of weights of keys that signed
+  thresholdMet    String   // "low" | "medium" | "high" | "none"
+  passed          Boolean  @default(false)
+  // Margin analysis
+  marginToNext    Int?     // weight needed to reach next threshold level
+  createdAt       DateTime @default(now())
+
+  @@index([contractAddress])
+  @@index([ledgerSequence])
+  @@index([passed])
 }

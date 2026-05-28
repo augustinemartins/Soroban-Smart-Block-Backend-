@@ -1,25 +1,29 @@
 import express from 'express';
+import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import rateLimit from 'express-rate-limit';
+import swaggerUi from 'swagger-ui-express';
 import { config } from './config';
 import { router } from './api/router';
-import { prisma } from './db';
+import { prismaWrite as prisma } from './db';
 import { startIndexerService } from './indexer/indexer';
+import { tieredRateLimit } from './middleware/rateLimit';
+import { replicaGuard } from './middleware/replicaGuard';
+import { swaggerSpec } from './indexer/swaggerSpec';
 
 const app = express();
 
-app.use(helmet());
+app.use(helmet({ contentSecurityPolicy: false })); // CSP off so Swagger UI loads
 app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
-app.use(rateLimit({
-  windowMs: config.rateLimitWindowMs,
-  max: config.rateLimitMax,
-  standardHeaders: true,
-  legacyHeaders: false,
-}));
+app.use(tieredRateLimit);
+app.use(replicaGuard);
+
+// Interactive API docs
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+app.get('/api/docs.json', (_req, res) => res.json(swaggerSpec));
 
 app.use('/api/v1', router);
 
@@ -31,8 +35,12 @@ async function main() {
   await prisma.$connect();
   startIndexerService().catch((err) => console.error('Indexer service failed:', err));
 
-  app.listen(config.port, () => {
+  const httpServer = createServer(app);
+  attachWebSocketServer(httpServer);
+
+  httpServer.listen(config.port, () => {
     console.log(`🚀 Soroban Explorer API running on port ${config.port}`);
+    console.log(`🔌 WebSocket event stream available at ws://localhost:${config.port}/ws/events`);
   });
 }
 

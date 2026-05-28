@@ -1,6 +1,46 @@
-import { xdr, scValToNative, Address } from '@stellar/stellar-sdk';
+import { xdr, scValToNative } from '@stellar/stellar-sdk';
 import { getContractAbi, decodeArgs, renderHuman } from './registry';
-import { prisma } from '../db';
+import { parseInvokeHostFunction } from './xdr-parser';
+import { prismaRead as prisma } from '../db';
+
+/**
+ * Look up a custom EventDefinition for a given contract + topic symbol.
+ * Returns the humanTemplate string if found, otherwise null.
+ */
+export async function lookupCustomEventTemplate(
+  contractAddress: string,
+  topicSymbol: string
+): Promise<string | null> {
+  const def = await prisma.eventDefinition.findUnique({
+    where: { contractAddress_topicSymbol: { contractAddress, topicSymbol } },
+    select: { humanTemplate: true },
+  });
+  return def?.humanTemplate ?? null;
+}
+
+/**
+ * Render a custom template by substituting {{data.key}} and {{topics.N}} placeholders.
+ * Supports: {{data.key}}, {{topics.0}}, {{topics.1}}, etc.
+ */
+export function renderCustomTemplate(
+  template: string,
+  topicValues: unknown[],
+  dataValue: unknown
+): string {
+  return template.replace(/\{\{([\w.]+)\}\}/g, (_match, path: string) => {
+    const parts = path.split('.');
+    if (parts[0] === 'topics' && parts[1] !== undefined) {
+      return String(topicValues[Number(parts[1])] ?? '');
+    }
+    if (parts[0] === 'data') {
+      const val = parts[1] !== undefined && typeof dataValue === 'object' && dataValue !== null
+        ? (dataValue as Record<string, unknown>)[parts[1]]
+        : dataValue;
+      return String(val ?? '');
+    }
+    return _match;
+  });
+}
 
 export interface DecodedTransaction {
   contractAddress: string | null;
@@ -13,45 +53,25 @@ export interface DecodedTransaction {
  * Decode a raw transaction XDR into human-readable form.
  */
 export async function decodeTransaction(rawXdr: string): Promise<DecodedTransaction> {
-  let envelope: xdr.TransactionEnvelope;
+  const parsed = parseInvokeHostFunction(rawXdr);
+  if (!parsed) {
+    return { contractAddress: null, functionName: null, functionArgs: null, humanReadable: null };
+  }
+
+  const { contractId: contractAddress, functionName } = parsed;
+
+  // Re-parse raw args as xdr.ScVal[] for the existing registry helpers
+  let rawArgs: xdr.ScVal[];
   try {
-    envelope = xdr.TransactionEnvelope.fromXDR(rawXdr, 'base64');
+    const envelope = xdr.TransactionEnvelope.fromXDR(rawXdr, 'base64');
+    const ops = envelope.switch().name === 'envelopeTypeTx'
+      ? envelope.v1().tx().operations()
+      : envelope.v0().tx().operations();
+    const invokeOp = ops.find((op) => op.body().switch().name === 'invokeHostFunction')!;
+    rawArgs = invokeOp.body().invokeHostFunctionOp().hostFunction().invokeContract().args();
   } catch {
-    return { contractAddress: null, functionName: null, functionArgs: null, humanReadable: null };
+    rawArgs = [];
   }
-
-  // Determine which arm is active and extract operations
-  let ops: xdr.Operation[];
-  try {
-    const switchName = envelope.switch().name;
-    if (switchName === 'envelopeTypeTx') {
-      ops = envelope.v1().tx().operations();
-    } else if (switchName === 'envelopeTypeTxV0') {
-      ops = envelope.v0().tx().operations();
-    } else {
-      return { contractAddress: null, functionName: null, functionArgs: null, humanReadable: null };
-    }
-  } catch {
-    return { contractAddress: null, functionName: null, functionArgs: null, humanReadable: null };
-  }
-
-  const invokeOp = ops.find(
-    (op) => op.body().switch().name === 'invokeHostFunction'
-  );
-
-  if (!invokeOp) {
-    return { contractAddress: null, functionName: null, functionArgs: null, humanReadable: null };
-  }
-
-  const hostFn = invokeOp.body().invokeHostFunctionOp().hostFunction();
-  if (hostFn.switch().name !== 'hostFunctionTypeInvokeContract') {
-    return { contractAddress: null, functionName: null, functionArgs: null, humanReadable: null };
-  }
-
-  const invokeArgs = hostFn.invokeContract();
-  const contractAddress = Address.fromScAddress(invokeArgs.contractAddress()).toString();
-  const functionName = invokeArgs.functionName().toString();
-  const rawArgs = invokeArgs.args();
 
   const abi = await getContractAbi(contractAddress);
   if (!abi) {
@@ -59,7 +79,7 @@ export async function decodeTransaction(rawXdr: string): Promise<DecodedTransact
   }
 
   const contract = await prisma.contract.findUnique({ where: { address: contractAddress } });
-  const decoded = decodeArgs(functionName, rawArgs, abi);
+  const decoded = decodeArgs(functionName, rawArgs, abi, contract?.tokenDecimals ?? undefined);
   const human = decoded
     ? renderHuman(functionName, decoded, abi, contract?.name, contract?.tokenDecimals ?? undefined)
     : `Called ${functionName} on ${contract?.name ?? contractAddress}`;
@@ -74,27 +94,27 @@ export function decodeEvent(
   topics: string[],
   data: string,
   contractName?: string | null
-): { eventType: string; decoded: Record<string, unknown> } {
+): { eventType: string; topicSymbol: string | null; decoded: Record<string, unknown> } {
   try {
     const topicVals = topics.map((t) => xdr.ScVal.fromXDR(t, 'base64'));
     const dataVal = xdr.ScVal.fromXDR(data, 'base64');
 
     // First topic is usually the event name symbol
-    const eventType = topicVals[0]
+    const rawSymbol = topicVals[0]
       ? String(scValToNative(topicVals[0]))
       : 'unknown';
 
-    const decoded: Record<string, unknown> = { event: eventType };
+    const decoded: Record<string, unknown> = { event: rawSymbol };
 
     // SEP-41 transfer event: topics = [Symbol("transfer"), from, to], data = amount
-    if (eventType === 'transfer' && topicVals.length >= 3) {
+    if (rawSymbol === 'transfer' && topicVals.length >= 3) {
       decoded.from = String(scValToNative(topicVals[1]));
       decoded.to = String(scValToNative(topicVals[2]));
       decoded.amount = String(scValToNative(dataVal));
-    } else if (eventType === 'mint' && topicVals.length >= 2) {
+    } else if (rawSymbol === 'mint' && topicVals.length >= 2) {
       decoded.to = String(scValToNative(topicVals[1]));
       decoded.amount = String(scValToNative(dataVal));
-    } else if (eventType === 'burn' && topicVals.length >= 2) {
+    } else if (rawSymbol === 'burn' && topicVals.length >= 2) {
       decoded.from = String(scValToNative(topicVals[1]));
       decoded.amount = String(scValToNative(dataVal));
     } else {
@@ -103,9 +123,9 @@ export function decodeEvent(
       decoded.data = scValToNative(dataVal);
     }
 
-    return { eventType: normalizeEventType(eventType), decoded };
+    return { eventType: normalizeEventType(rawSymbol), topicSymbol: rawSymbol, decoded };
   } catch {
-    return { eventType: 'unknown', decoded: { raw: { topics, data } } };
+    return { eventType: 'unknown', topicSymbol: null, decoded: { raw: { topics, data } } };
   }
 }
 

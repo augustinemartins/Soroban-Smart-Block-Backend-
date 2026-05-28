@@ -1,5 +1,7 @@
-import { xdr, scValToNative, Address } from '@stellar/stellar-sdk';
-import { prisma } from '../db';
+import { xdr } from '@stellar/stellar-sdk';
+import { prismaRead as prisma } from '../db';
+import { decodeTypedArgs, formatAmount } from './args-decoder';
+import { renderTemplate } from './template-engine';
 
 export interface ContractAbi {
   functions: AbiFunction[];
@@ -80,30 +82,26 @@ export async function getContractAbi(contractAddress: string): Promise<ContractA
 
 /**
  * Decode raw XDR ScVal arguments into a named map using the ABI.
+ * Values are the formatted strings from the typed decoder.
  */
 export function decodeArgs(
   fnName: string,
   rawArgs: xdr.ScVal[],
-  abi: ContractAbi
+  abi: ContractAbi,
+  decimals?: number
 ): Record<string, unknown> | null {
   const fn = abi.functions.find((f) => f.name === fnName);
   if (!fn) return null;
-
-  const result: Record<string, unknown> = {};
-  fn.inputs.forEach((param, i) => {
-    const val = rawArgs[i];
-    if (!val) return;
-    try {
-      result[param.name] = scValToNative(val);
-    } catch {
-      result[param.name] = val.toXDR('base64');
-    }
-  });
-  return result;
+  const typed = decodeTypedArgs(fn.inputs, rawArgs, decimals);
+  // Expose { raw, formatted } per key so callers can choose
+  return Object.fromEntries(
+    Object.entries(typed).map(([k, v]) => [k, v])
+  );
 }
 
 /**
  * Render a human-readable string from decoded args and a template.
+ * Delegates to the standalone template engine.
  */
 export function renderHuman(
   fnName: string,
@@ -114,18 +112,5 @@ export function renderHuman(
 ): string {
   const fn = abi.functions.find((f) => f.name === fnName);
   if (!fn?.humanTemplate) return `Called ${fnName} on ${contractName ?? 'contract'}`;
-
-  let text = fn.humanTemplate;
-  for (const [key, val] of Object.entries(args)) {
-    let display = String(val);
-    // Format i128 amounts with decimals
-    if (decimals && (key === 'amount' || key === 'amount_in' || key === 'amount_out')) {
-      const num = BigInt(display);
-      const divisor = BigInt(10 ** decimals);
-      display = (Number(num) / Number(divisor)).toFixed(decimals > 4 ? 4 : decimals);
-    }
-    text = text.replace(new RegExp(`\\{${key}\\}`, 'g'), display);
-  }
-  if (contractName) text += ` on ${contractName}`;
-  return text;
+  return renderTemplate(fn.humanTemplate, { args, decimals, contractName: contractName ?? undefined });
 }

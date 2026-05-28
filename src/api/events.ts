@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { prisma } from '../db';
+import { prismaRead as prisma } from '../db';
 import { z } from 'zod';
 
 export const eventRouter = Router();
@@ -9,22 +9,23 @@ const paginationSchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(20),
 });
 
-// GET /events?contract=&type=&page=1
+// GET /events?contract=&type=&topic=&page=1
 eventRouter.get('/', async (req: Request, res: Response) => {
   try {
     const { page, limit } = paginationSchema.parse(req.query);
-    const { contract, type } = req.query as Record<string, string>;
+    const { contract, type, topic } = req.query as Record<string, string>;
     const skip = (page - 1) * limit;
 
     const where = {
       ...(contract && { contractAddress: contract }),
       ...(type && { eventType: type }),
+      ...(topic && { topicSymbol: topic }),
     };
 
     const [events, total] = await Promise.all([
       prisma.event.findMany({
         where,
-        orderBy: { ledger: 'desc' },
+        orderBy: { ledgerSequence: 'desc' },
         skip,
         take: limit,
         select: {
@@ -32,8 +33,9 @@ eventRouter.get('/', async (req: Request, res: Response) => {
           transactionHash: true,
           contractAddress: true,
           eventType: true,
+          topicSymbol: true,
           decoded: true,
-          ledger: true,
+          ledgerSequence: true,
           ledgerCloseTime: true,
         },
       }),
