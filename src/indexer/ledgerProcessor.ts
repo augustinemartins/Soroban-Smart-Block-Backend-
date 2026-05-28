@@ -79,9 +79,30 @@ export async function processLedgerRange(start: number, end: number): Promise<vo
           failureReason,
         },
       });
+
+      // Inspect for secp256r1 / passkey signatures (non-blocking)
+      if (rawXdr) {
+        inspectSignature(event.transactionHash, event.ledgerSequence, rawXdr).catch(() => {});
+      }
     }
   }
 
   const stored = await ingestEvents(start, end);
   console.log(`[worker] ledgers ${start}–${end}: ${events.length} txs, ${stored} events`);
+
+  // Group transactions by ledger and run contention detection
+  const byLedger = new Map<number, Array<{ hash: string; contractAddress: string | null; rawXdr: string }>>();
+  for (const event of events) {
+    if (!byLedger.has(event.ledgerSequence)) byLedger.set(event.ledgerSequence, []);
+    const tx = await prisma.transaction.findUnique({
+      where: { hash: event.transactionHash },
+      select: { hash: true, contractAddress: true, rawXdr: true },
+    });
+    if (tx) byLedger.get(event.ledgerSequence)!.push(tx);
+  }
+  for (const [ledger, txs] of byLedger) {
+    await detectContention(ledger, txs).catch((err) =>
+      console.warn(`[contention] ledger ${ledger} detection failed:`, err)
+    );
+  }
 }
