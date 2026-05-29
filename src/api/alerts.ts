@@ -118,3 +118,41 @@ alertsRouter.get('/flash-loans', async (req: Request, res: Response) => {
   const alerts = await detectFlashLoans(ledger);
   res.json({ alerts });
 });
+
+/**
+ * @swagger
+ * /api/v1/alerts/reentrancy:
+ *   get:
+ *     summary: List re-entrancy and drain attack alerts
+ *     tags: [Alerts]
+ *     parameters:
+ *       - in: query
+ *         name: contract
+ *         schema: { type: string }
+ *         description: Filter by contract address
+ *       - in: query
+ *         name: severity
+ *         schema: { type: string, enum: [low, medium, high] }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20 }
+ *     responses:
+ *       200:
+ *         description: Re-entrancy alerts
+ */
+alertsRouter.get('/reentrancy', async (req: Request, res: Response) => {
+  const contract = req.query.contract ? String(req.query.contract) : undefined;
+  const severity = req.query.severity ? String(req.query.severity) : undefined;
+  const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? '20'), 10)));
+
+  const alerts = await prisma.reentrancyAlert.findMany({
+    where: {
+      ...(contract ? { contractAddress: contract } : {}),
+      ...(severity ? { severity } : {}),
+    },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+  });
+
+  res.json({ alerts });
+});

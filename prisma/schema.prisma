@@ -81,6 +81,7 @@ model Transaction {
   sorobanResources Json?   // #48: CPU, memory, ledger footprint metrics
   failureReason   String?  // #49: human-readable failure explanation
   flashLoanAlert  Boolean  @default(false) // #137: flash loan attack detected
+  reentrantAlert  Boolean  @default(false) // re-entrancy / drain attack detected
   createdAt       DateTime @default(now())
 
   ledger   Ledger    @relation(fields: [ledgerSequence], references: [sequence])
@@ -296,6 +297,24 @@ model FailedItem {
 
   @@index([itemType, dead])
   @@index([ledger])
+}
+
+// Re-entrancy / drain attack alert — one row per suspicious transaction
+model ReentrancyAlert {
+  id              String   @id @default(cuid())
+  transactionHash String   @unique
+  contractAddress String
+  ledgerSequence  Int
+  repeatedWithdrawCalls Int  @default(0)  // # of repeated withdraw/transfer calls to same contract
+  maxCallDepth    Int      @default(0)   // deepest cross-contract call chain seen
+  cyclicCallPairs Json     @default("[]") // [[caller, callee], ...] pairs that form cycles
+  severity        String   // "low" | "medium" | "high"
+  signals         Json     // human-readable list of triggered signal descriptions
+  createdAt       DateTime @default(now())
+
+  @@index([contractAddress])
+  @@index([ledgerSequence])
+  @@index([severity])
 }
 
 // Storage efficiency: tracks allocated footprint bytes vs actual data bytes per tx
