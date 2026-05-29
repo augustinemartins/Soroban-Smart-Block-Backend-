@@ -17,6 +17,7 @@ import { coldStorageRouter } from './middleware/coldStorageRouter';
 import { swaggerSpec } from './indexer/swaggerSpec';
 import { attachWebSocketServer } from './ws/eventBroadcaster';
 import { warmTokenMetadataCache } from './indexer/token-metadata';
+import { cacheConnect } from './cache';
 
 const app = express();
 
@@ -49,6 +50,7 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', network: config.stell
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
 async function main() {
+  await cacheConnect();
   await prisma.$connect();
   dbConnectionStatus.set(1);
   startIndexerService().catch((err) => console.error('Indexer service failed:', err));

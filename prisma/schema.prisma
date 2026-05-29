@@ -81,6 +81,7 @@ model Transaction {
   sorobanResources Json?   // #48: CPU, memory, ledger footprint metrics
   failureReason   String?  // #49: human-readable failure explanation
   flashLoanAlert  Boolean  @default(false) // #137: flash loan attack detected
+  reentrantAlert  Boolean  @default(false) // re-entrancy / drain attack detected
   createdAt       DateTime @default(now())
 
   ledger   Ledger    @relation(fields: [ledgerSequence], references: [sequence])
@@ -298,6 +299,24 @@ model FailedItem {
   @@index([ledger])
 }
 
+// Re-entrancy / drain attack alert — one row per suspicious transaction
+model ReentrancyAlert {
+  id              String   @id @default(cuid())
+  transactionHash String   @unique
+  contractAddress String
+  ledgerSequence  Int
+  repeatedWithdrawCalls Int  @default(0)  // # of repeated withdraw/transfer calls to same contract
+  maxCallDepth    Int      @default(0)   // deepest cross-contract call chain seen
+  cyclicCallPairs Json     @default("[]") // [[caller, callee], ...] pairs that form cycles
+  severity        String   // "low" | "medium" | "high"
+  signals         Json     // human-readable list of triggered signal descriptions
+  createdAt       DateTime @default(now())
+
+  @@index([contractAddress])
+  @@index([ledgerSequence])
+  @@index([severity])
+}
+
 // Storage efficiency: tracks allocated footprint bytes vs actual data bytes per tx
 model StorageEfficiencyLog {
   id              String   @id @default(cuid())
@@ -482,6 +501,45 @@ model TaxExportJob {
   @@index([walletAddress])
   @@index([taxYear])
   @@index([status])
+}
+
+// Webhook subscriptions — developer-registered URLs that receive event payloads
+model WebhookSubscription {
+  id              String   @id @default(cuid())
+  url             String                        // target HTTPS endpoint
+  secret          String?                       // optional HMAC-SHA256 signing secret
+  contractAddress String?                       // null = all contracts
+  eventType       String?                       // null = all event types
+  topicSymbol     String?                       // null = all topic symbols
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  deliveries      WebhookDelivery[]
+
+  @@index([contractAddress])
+  @@index([active])
+}
+
+// Delivery log — one row per dispatch attempt
+model WebhookDelivery {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  eventId        String                        // Event.id that triggered this delivery
+  attempt        Int      @default(1)          // 1-based attempt counter
+  status         String   @default("pending")  // pending | success | failed
+  httpStatus     Int?                          // HTTP response code from target
+  responseBody   String?                       // first 500 chars of response
+  errorMsg       String?
+  nextRetryAt    DateTime?                     // null once terminal
+  deliveredAt    DateTime?
+  createdAt      DateTime @default(now())
+
+  subscription   WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@index([status, nextRetryAt])
+  @@index([eventId])
 }
 
 // i18n translation dictionary

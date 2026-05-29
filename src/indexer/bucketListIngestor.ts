@@ -1,5 +1,5 @@
 import { prismaWrite as prisma } from '../db';
-import { getStellarRpc } from './rpc';
+import { getLedger } from './rpc';
 
 interface BucketListSnapshot {
   ledgerSequence: number;
@@ -17,12 +17,11 @@ const BUCKET_SYNC_BATCH_SIZE = 1000;
 export async function ingestBucketListSnapshot(ledgerSequence: number): Promise<BucketListSnapshot> {
   console.log(`[BucketList] Ingesting snapshot for ledger ${ledgerSequence}`);
 
-  const rpc = getStellarRpc();
   const stateEntries = new Map<string, StateEntry>();
 
   try {
     // Fetch ledger info to get bucket list hash
-    const ledger = await rpc.getLedger(ledgerSequence);
+    const ledger = await getLedger(ledgerSequence);
     
     // In production, this would interface with Stellar Core's BucketList directly
     // For now, we simulate by fetching contract state via RPC

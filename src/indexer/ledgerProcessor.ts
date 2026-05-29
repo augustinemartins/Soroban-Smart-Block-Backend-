@@ -6,6 +6,12 @@ import { enqueueFailure } from './errorQueue';
 import { extractSorobanResources } from './resource-tracker';
 import { parseFailureReason, parseFailureReasonFromString } from './failure-parser';
 import { safeXdrParse } from './protocol-guard';
+import { barrierUpsertContract, barrierUpsertLedger } from './writeBarrier';
+import { inspectSignature } from './signatureInspector';
+import { detectContention } from './contention';
+import { analyseCallTrace, storeReentrancyAlert } from './reentrancy-detector';
+import { parseCallTrace } from './call-trace';
+import { xdr } from '@stellar/stellar-sdk';
 
 /**
  * Fetch, decode, and persist all transactions and events for [start, end].
@@ -83,6 +89,27 @@ export async function processLedgerRange(start: number, end: number): Promise<vo
       // Inspect for secp256r1 / passkey signatures (non-blocking)
       if (rawXdr) {
         inspectSignature(event.transactionHash, event.ledgerSequence, rawXdr).catch(() => {});
+      }
+
+      // Re-entrancy / drain attack detection (non-blocking)
+      const diagnosticEvents: xdr.DiagnosticEvent[] = (txResult as any)?.diagnosticEventsXdr ?? [];
+      if (diagnosticEvents.length > 0 && decoded.contractAddress) {
+        try {
+          const trace = parseCallTrace(diagnosticEvents);
+          const signal = analyseCallTrace(
+            event.transactionHash,
+            decoded.contractAddress,
+            event.ledgerSequence,
+            trace,
+          );
+          if (signal) {
+            storeReentrancyAlert(signal).catch((err) =>
+              console.warn(`[reentrancy] store failed for ${event.transactionHash}:`, err),
+            );
+          }
+        } catch {
+          // non-critical — never block indexing
+        }
       }
     }
   }

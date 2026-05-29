@@ -1,6 +1,7 @@
 import type { AxiosError } from 'axios';
 import { SorobanRpc } from '@stellar/stellar-sdk';
 import { config } from '../config';
+import { cacheGet, cacheSet } from '../cache';
 
 export const rpc = new SorobanRpc.Server(config.stellarRpcUrl, { allowHttp: true });
 
@@ -12,6 +13,8 @@ export interface LedgerEvent {
   topics: string[];
   data: string;
 }
+
+const LEDGER_CACHE_PREFIX = 'ledger:';
 
 const EVENT_PAGE_SIZE = 200;
 const MAX_RETRY_ATTEMPTS = 6;
@@ -103,6 +106,21 @@ export async function fetchEvents(startLedger: number, endLedger: number): Promi
 export async function getLatestLedger(): Promise<number> {
   const info = await retry(() => rpc.getLatestLedger());
   return Number(info.sequence);
+}
+
+/**
+ * Fetch a ledger from RPC and cache immutable historical snapshots.
+ * Ledger 0 is considered permanently immutable and is cached indefinitely.
+ */
+export async function getLedger(ledgerSequence: number): Promise<unknown> {
+  const cacheKey = `${LEDGER_CACHE_PREFIX}${ledgerSequence}`;
+  const cached = await cacheGet<unknown>(cacheKey);
+  if (cached !== null) return cached;
+
+  const ledger = await retry(() => rpc.getLedger(ledgerSequence));
+  const ttl = ledgerSequence === 0 ? null : 60 * 60 * 24;
+  await cacheSet(cacheKey, ledger, ttl);
+  return ledger;
 }
 
 /**

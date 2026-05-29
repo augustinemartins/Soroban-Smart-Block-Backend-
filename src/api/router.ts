@@ -17,6 +17,7 @@ import { sseRouter } from './sse';
 import { graphRouter } from './graph';
 import { virtualListRouter } from './virtualList';
 import { tokenMetadataRouter } from './token-metadata';
+import { webhooksRouter } from './webhooks';
 
 export const router = Router();
 
@@ -38,3 +39,4 @@ router.use('/sse', sseRouter);
 router.use('/graph', graphRouter);
 router.use('/virtual-list', virtualListRouter);
 router.use('/token-metadata', tokenMetadataRouter);
+router.use('/webhooks', webhooksRouter);
