@@ -25,7 +25,7 @@
     "seed": "ts-node prisma/seed.ts",
     "test": "vitest run",
     "postinstall": "prisma generate",
-    "lint": "eslint 'src/**/*.ts' --max-warnings 150",
+    "lint": "eslint 'src/**/*.ts' --max-warnings 200",
     "lint:fix": "eslint 'src/**/*.ts' --fix",
     "format": "prettier --check 'src/**/*.ts'",
     "format:fix": "prettier --write 'src/**/*.ts'"

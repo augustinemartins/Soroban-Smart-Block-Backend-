@@ -1101,6 +1101,69 @@ model FrozenLedgerKey {
   @@index([active])
 }
 
+// ── Performance Benchmarking Suite Models ─────────────────────────────────────
+
+// Pre-computed operation microbenchmarks aggregated across all transactions
+model OperationBenchmark {
+  id           String   @id @default(cuid())
+  name         String   @unique  // e.g. "token_transfer", "token_balance_of", "swap"
+  avgCpu       Int      @default(0)
+  avgMemory    Int      @default(0)
+  avgFeeStroops BigInt  @default(0)
+  samples      Int      @default(0)
+  lastUpdated  DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  @@index([name])
+}
+
+// Per-contract per-function benchmark snapshot (for trend/regression analysis)
+model ContractBenchmarkSnapshot {
+  id              String   @id @default(cuid())
+  contractAddress String
+  functionName    String
+  avgCpu          Int      @default(0)
+  avgMemory       Int      @default(0)
+  avgFeeStroops   BigInt   @default(0)
+  minFeeStroops   BigInt   @default(0)
+  maxFeeStroops   BigInt   @default(0)
+  minCpu          Int      @default(0)
+  maxCpu          Int      @default(0)
+  samples         Int      @default(0)
+  ledgerSequence  Int      // snapshot ledger
+  createdAt       DateTime @default(now())
+
+  @@index([contractAddress, functionName, ledgerSequence])
+  @@index([contractAddress, createdAt])
+}
+
+// Standards compliance thresholds per contract type (SEP-41, DEX, NFT, etc.)
+model StandardCompliance {
+  id              String   @id @default(cuid())
+  contractType    String   // "sep-41", "dex", "nft", "lending", "staking"
+  functionName    String
+  maxCpu          Int      @default(0)
+  maxMemory       Int      @default(0)
+  maxFeeStroops   BigInt   @default(0)
+  description     String?  // e.g. "SEP-41 token transfer expected range"
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([contractType, functionName])
+  @@index([contractType])
+}
+
+// Gas golfing tips for common function patterns
+model GasGolfingTip {
+  id           String   @id @default(cuid())
+  functionName String   @unique
+  tips         Json     @default("[]")  // ["Reduce event data", "Batch storage operations"]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([functionName])
+}
+
 // CAP-0077: Freeze violation records
 model FreezeViolation {
   id              String   @id @default(cuid())
