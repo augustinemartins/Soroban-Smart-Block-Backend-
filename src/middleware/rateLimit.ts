@@ -85,8 +85,8 @@ export async function initRateLimitStore(): Promise<void> {
     const { RedisStore } = await import('rate-limit-redis');
 
     const client = createClient({ url: redisUrl });
-    client.on('error', (err: Error) =>
-      console.warn('[rate-limit] Redis error:', err.message)
+    client.on('error', (err: unknown) =>
+      console.warn('[rate-limit] Redis error:', (err as Error).message)
     );
     await client.connect();
 

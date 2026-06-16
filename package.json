@@ -23,7 +23,8 @@
     "repair": "ts-node src/indexer/repair-run.ts",
     "archive": "ts-node src/archival/run.ts",
     "seed": "ts-node prisma/seed.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "postinstall": "prisma generate"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
