@@ -937,6 +937,52 @@ model Translation {
 
 
 
+// #320: Yield Farming & Staking Optimizer — risk-scored yield opportunities
+model YieldOpportunity {
+  id              String   @id
+  contractAddress String
+  name            String
+  type            String   // lp_farming | staking | lending | liquid_staking | vault
+  tokens          Json     @default("[]")  // [String] token symbols involved
+  baseApy         Float    @default(0)     // organic APY from fees/interest
+  incentiveApy    Float    @default(0)     // APY from token incentives
+  totalApy        Float    @default(0)     // baseApy + incentiveApy
+  tvl             String   @default("0")   // total value locked (decimal string)
+  lockupDays      Int      @default(0)
+  minDeposit      String   @default("0")   // decimal string
+  depositFee      Float    @default(0)     // percentage (e.g. 0.1 = 0.1%)
+  withdrawFee     Float    @default(0)     // percentage
+  // Composite risk score 0-100 (higher = riskier)
+  riskScore       Int      @default(0)
+  riskLabel       String   @default("unknown") // low | medium | high | unknown
+  lastObservedAt  DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([contractAddress, type])
+  @@index([type])
+  @@index([totalApy])
+  @@index([riskScore])
+  @@index([lastObservedAt])
+}
+
+// #320: Daily APY/TVL history snapshots for a yield opportunity
+model YieldHistorySnapshot {
+  id              String   @id @default(cuid())
+  opportunityId   String
+  snapshotDate    DateTime // truncated to start-of-day UTC
+  apy             Float
+  baseApy         Float    @default(0)
+  incentiveApy    Float    @default(0)
+  tvl             String   @default("0")
+  ledgerSequence  Int?
+  createdAt       DateTime @default(now())
+
+  @@unique([opportunityId, snapshotDate])
+  @@index([opportunityId])
+  @@index([snapshotDate])
+}
+
 // #220: High-Throughput Batch-Settlement Event Compact Engine
 // One row per (contractAddress, windowKey) — a window covers WINDOW_SIZE ledgers.
 // Replaces thousands of raw settlement Event rows with a single scannable summary.

@@ -8,6 +8,7 @@ import { broadcastSSEEvent } from '../api/sse';
 import { barrierUpsertContract, barrierUpsertEvent } from './writeBarrier';
 import { getWhaleWatcher } from './whaleWatcher';
 import { processYieldEvent } from './yield-distribution';
+import { processYieldOpportunityEvent } from './yield-optimizer';
 import { dispatchWebhooks } from '../webhooks/dispatcher';
 import { maybeActivateFromTransferEvent } from './sac-account-activator';
 
@@ -178,6 +179,20 @@ async function storeEvent(event: LedgerEvent): Promise<number> {
     decoded as Record<string, unknown> | null,
     event.ledgerSequence,
     event.ledgerCloseTime,
+  );
+
+  // #320: Detect yield opportunities (LP, staking, lending, vaults) and
+  // upsert into the optimisation registry. Non-fatal on error so a bad
+  // payload cannot block the SSE/webhook broadcast pipeline.
+  processYieldOpportunityEvent(
+    event.transactionHash,
+    event.contractId,
+    topicSymbol,
+    decoded as Record<string, unknown> | null,
+    event.ledgerSequence,
+    event.ledgerCloseTime,
+  ).catch((err) =>
+    console.warn(`[yield-optimizer/event] upsert failed for ${event.transactionHash}:`, err),
   );
 
   const broadcastPayload = {
