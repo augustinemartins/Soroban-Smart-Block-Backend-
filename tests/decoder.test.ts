@@ -22,9 +22,9 @@ describe('decodeEvent', () => {
     const result = decodeEvent(topics, data);
 
     expect(result.eventType).toBe('transfer');
-    expect(result.decoded.from).toBe(ADDR_A);
-    expect(result.decoded.to).toBe(ADDR_B);
-    expect(typeof result.decoded.amount).toBe('string');
+    expect(result.decoded.from).toBe(from);
+    expect(result.decoded.to).toBe(to);
+    expect(result.decoded.amount).toBe('0.0001000');
   });
 
   it('decodes a SEP-41 mint event', () => {
@@ -38,9 +38,8 @@ describe('decodeEvent', () => {
     const result = decodeEvent(topics, data);
 
     expect(result.eventType).toBe('mint');
-    expect(result.decoded.admin).toBe(ADDR_C);
-    expect(result.decoded.to).toBe(ADDR_A);
-    expect(typeof result.decoded.amount).toBe('string');
+    expect(result.decoded.to).toBe(to);
+    expect(result.decoded.amount).toBe('0.0000500');
   });
 
   it('falls back gracefully on unknown event type', () => {
