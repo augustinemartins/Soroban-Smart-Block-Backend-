@@ -2390,3 +2390,111 @@ model TimerAlert {
 }
 
 // ─── End Soroban Temporal Orchestrator ────────────────────────────────────────
+
+// ─── Data Mesh - Multi-Channel Real-Time Streaming Platform ─────────────────
+
+model FeedChannel {
+  id                String   @id @default(cuid())
+  name              String   @unique
+  description       String?
+  category          String   // "transaction" | "event" | "ledger" | "derived"
+  schema            Json     // JSON Schema for the channel data
+  retentionDays     Int      @default(30) @map("retention_days")
+  enabled           Boolean  @default(true)
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@map("feed_channels")
+}
+
+model FeedSubscription {
+  id                String   @id @default(cuid())
+  userId            String?  @map("user_id")
+  channelName       String   @map("channel_name")
+  filters           Json?    // channel-specific filters
+  deliveryType      String   // "webhook" | "websocket" | "sse" | "queue"
+  deliveryConfig    Json     @map("delivery_config")
+  status            String   // "active" | "paused" | "error"
+  batchSize         Int      @default(1) @map("batch_size")
+  maxRatePerSecond  Int?     @map("max_rate_per_second")
+  createdAt         DateTime @default(now()) @map("created_at")
+  lastDeliveryAt    DateTime? @map("last_delivery_at")
+  totalDelivered    Int      @default(0) @map("total_delivered")
+  totalFailed       Int      @default(0) @map("total_failed")
+  lastError         String?  @map("last_error")
+
+  @@index([userId])
+  @@index([channelName])
+  @@index([status])
+  @@map("feed_subscriptions")
+}
+
+model FeedMessage {
+  id              String   @id @default(cuid())
+  channelName     String   @map("channel_name")
+  sequence        BigInt   @unique
+  data            Json
+  dataVersion     Int      @default(1) @map("data_version")
+  ledgerSequence  Int      @map("ledger_sequence")
+  timestamp       DateTime
+  indexedAt       DateTime @default(now()) @map("indexed_at")
+
+  @@index([channelName, sequence])
+  @@index([channelName, timestamp])
+  @@index([ledgerSequence])
+  @@map("feed_messages")
+}
+
+model BackfillRequest {
+  id              String   @id @default(cuid())
+  userId          String?  @map("user_id")
+  channelName     String   @map("channel_name")
+  startTime       DateTime @map("start_time")
+  endTime         DateTime @map("end_time")
+  format          String   // "jsonl" | "csv" | "parquet" | "arrow" | "json"
+  filters         Json?
+  status          String   // "pending" | "processing" | "completed" | "failed"
+  progress        Float    @default(0)
+  fileUrl         String?  @map("file_url")
+  fileSizeBytes   Int?     @map("file_size_bytes")
+  recordCount     Int?     @map("record_count")
+  errorMessage    String?  @map("error_message")
+  createdAt       DateTime @default(now()) @map("created_at")
+  completedAt     DateTime? @map("completed_at")
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([channelName, status])
+  @@map("backfill_requests")
+}
+
+model DerivedMetric {
+  id              String   @id @default(cuid())
+  name            String
+  timestamp       DateTime
+  value           Float
+  metadata        Json?
+  granularity     String   // "1m" | "5m" | "15m" | "1h" | "1d"
+
+  @@index([name, timestamp])
+  @@index([name, granularity, timestamp(sort: Desc)])
+  @@map("derived_metrics")
+}
+
+model MarketDataSnapshot {
+  id              String   @id @default(cuid())
+  tokenAddress    String   @map("token_address")
+  tokenSymbol     String?  @map("token_symbol")
+  timestamp       DateTime
+  priceUsd        Float?   @map("price_usd")
+  volume24h       Decimal? @map("volume_24h")
+  tvl             Decimal?
+  liquidity       Decimal?
+  priceChange1h   Float?   @map("price_change_1h")
+  priceChange24h  Float?   @map("price_change_24h")
+  trades24h       Int?     @map("trades_24h")
+  uniqueTraders24h Int?    @map("unique_traders_24h")
+
+  @@index([tokenAddress, timestamp(sort: Desc)])
+  @@map("market_data_snapshots")
+}
+
+// ─── End Data Mesh Platform ─────────────────────────────────────────────────

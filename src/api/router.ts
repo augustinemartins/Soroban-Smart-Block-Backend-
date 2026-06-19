@@ -38,6 +38,10 @@ import { privacyRouter } from './privacy';
 import { mevRouter } from './mev';
 import { developerRouter } from './developer/router';
 import { scheduleRouter } from './schedule';
+import feedRouter from './feed';
+import backfillRouter from './backfill';
+import marketRouter from './market';
+import feedSSERouter from './feedSSE';
 
 export const router = Router();
 
@@ -79,3 +83,8 @@ router.use('/privacy', privacyRouter);
 router.use('/mev', mevRouter);
 router.use('/developer', developerRouter);
 router.use('/schedule', scheduleRouter);
+// Data Mesh Platform APIs
+router.use('/feed', feedRouter);
+router.use('/feed/backfill', backfillRouter);
+router.use('/feed/sse', feedSSERouter);
+router.use('/market', marketRouter);
