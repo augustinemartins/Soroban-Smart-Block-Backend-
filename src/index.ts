@@ -31,6 +31,7 @@ import { startPrivacyDetector } from './indexer/privacy-background-detector';
 import { attachPrivacyWebSocket } from './ws/privacyBroadcaster';
 import { errorHandler } from './middleware/errorHandler';
 import { logger } from './logger';
+import { feedOrchestrator } from './feed/orchestrator';
 
 const app = express();
 
@@ -101,6 +102,9 @@ async function main() {
   const httpServer = createServer(app);
   attachWebSocketServer(httpServer);
   attachPrivacyWebSocket(httpServer);
+
+  // Initialize Feed Orchestrator with WebSocket support
+  await feedOrchestrator.initialize(httpServer);
 
   httpServer.listen(config.port, () => {
     logger.info('Soroban Explorer API started', { port: config.port });
