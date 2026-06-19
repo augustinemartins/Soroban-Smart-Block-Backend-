@@ -28,7 +28,9 @@
     "lint": "eslint 'src/**/*.ts' --max-warnings 200",
     "lint:fix": "eslint 'src/**/*.ts' --fix",
     "format": "prettier --check 'src/**/*.ts'",
-    "format:fix": "prettier --write 'src/**/*.ts'"
+    "format:fix": "prettier --write 'src/**/*.ts'",
+    "validate-routes": "ts-node scripts/validate-routes.ts",
+    "test:routes": "vitest run tests/orphaned-routers-integration.test.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
