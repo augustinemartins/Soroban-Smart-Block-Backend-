@@ -3,6 +3,7 @@ import { prismaWrite as prisma } from '../db';
 import { config } from '../config';
 import { fetchEvents, getLatestLedger, getRpcWebsocketUrl, getTransaction, getTransactionFromHorizon, type LedgerEvent } from './rpc';
 import { decodeTransaction, decodeEvent } from './decoder';
+import { feedOrchestrator } from '../feed/orchestrator';
 
 const BATCH = config.indexerBatchSize;
 const WORKERS = config.indexerCatchupWorkers;
@@ -53,7 +54,7 @@ async function processLedgerRange(start: number, end: number) {
             humanReadable: null,
           };
 
-      await prisma.transaction.upsert({
+      const transaction = await prisma.transaction.upsert({
         where: { hash: event.transactionHash },
         update: {},
         create: {
@@ -70,11 +71,14 @@ async function processLedgerRange(start: number, end: number) {
           feeCharged: String((txResult as any)?.feeCharged ?? ''),
         },
       });
+
+      // Publish to feed
+      await feedOrchestrator.publishTransaction(transaction).catch(console.error);
     }
 
     const { eventType, decoded } = decodeEvent(event.topics, event.data);
     const eventId = `${event.transactionHash}-${event.topics[0] ?? '0'}`;
-    await prisma.event.upsert({
+    const savedEvent = await prisma.event.upsert({
       where: { id: eventId },
       update: {},
       create: {
@@ -89,6 +93,9 @@ async function processLedgerRange(start: number, end: number) {
         ledgerCloseTime: event.ledgerCloseTime,
       },
     });
+
+    // Publish event to feed
+    await feedOrchestrator.publishEvent(savedEvent).catch(console.error);
 
     await processSessionAuthorization(event, eventType, decoded, eventId);
   }

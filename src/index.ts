@@ -33,6 +33,7 @@ import { attachPrivacyWebSocket } from './ws/privacyBroadcaster';
 import { attachComposabilityWebSocket } from './ws/composabilityBroadcaster';
 import { errorHandler } from './middleware/errorHandler';
 import { logger } from './logger';
+import { feedOrchestrator } from './feed/orchestrator';
 
 const app = express();
 
@@ -109,6 +110,9 @@ async function main() {
   attachWebSocketServer(httpServer);
   attachPrivacyWebSocket(httpServer);
   attachComposabilityWebSocket(httpServer);
+
+  // Initialize Feed Orchestrator with WebSocket support
+  await feedOrchestrator.initialize(httpServer);
 
   httpServer.listen(config.port, () => {
     logger.info('Soroban Explorer API started', { port: config.port });

@@ -35,7 +35,13 @@ import { networkRouter } from './network';
 import { emergencyBaseRouter } from './emergency-router';
 import { stellarRouter } from './stellar';
 import { privacyRouter } from './privacy';
-import { composabilityRouter } from './composability';
+import { mevRouter } from './mev';
+import { developerRouter } from './developer/router';
+import { scheduleRouter } from './schedule';
+import feedRouter from './feed';
+import backfillRouter from './backfill';
+import marketRouter from './market';
+import feedSSERouter from './feedSSE';
 
 export const router = Router();
 
@@ -74,4 +80,11 @@ router.use('/network', networkRouter);
 router.use('/emergency', emergencyBaseRouter);
 router.use('/stellar', stellarRouter);
 router.use('/privacy', privacyRouter);
-router.use('/composability', composabilityRouter);
+router.use('/mev', mevRouter);
+router.use('/developer', developerRouter);
+router.use('/schedule', scheduleRouter);
+// Data Mesh Platform APIs
+router.use('/feed', feedRouter);
+router.use('/feed/backfill', backfillRouter);
+router.use('/feed/sse', feedSSERouter);
+router.use('/market', marketRouter);

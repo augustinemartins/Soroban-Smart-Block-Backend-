@@ -48,7 +48,10 @@ model Contract {
   @@index([address])
 }
 
-// WASM bytecode upgrade history for contract version lineage
+// WASM bytecode upgrade history for contract version lineage.
+// Also carries the Contract Governance Intelligence layer: who upgraded,
+// how the code changed (WASM diff), how decentralised the upgrade authority
+// is, and whether the upgrade looks suspicious.
 model WasmUpgradeHistory {
   id              String   @id @default(cuid())
   contractAddress String
@@ -59,10 +62,35 @@ model WasmUpgradeHistory {
   transactionHash String?  // tx that triggered the upgrade
   createdAt       DateTime @default(now())
 
+  // ── Phase 1: upgrade provenance ──────────────────────────────────────────
+  upgrader                  String?  // account that authorised the upgrade
+  upgraderAccountAgeLedgers Int?     // age (in ledgers) of the upgrader account at upgrade time
+
+  // ── Phase 3: WASM diff classification ────────────────────────────────────
+  changeClassification String?  // "minor" | "moderate" | "major" | "critical"
+  changeSummary        String?  // natural-language description of the change
+  diffStats            Json?    // { opcodeChurn, addedOpcodes, removedOpcodes, addedFunctions, removedFunctions, ... }
+  criticalFnChanges    String[] // critical functions added/removed/changed by this upgrade
+
+  // ── Phase 2: governance analysis ─────────────────────────────────────────
+  governanceType       String?  // "single_key" | "multisig" | "timelock" | "dao" | "unknown"
+  signerCount          Int?     // number of signers on the upgrader authority
+  threshold            Int?     // signature weight / threshold required
+  timelockSeconds      Int?     // enforced delay before the upgrade could execute, if any
+  daoProposalId        String?  // correlated governance proposal id, if any
+  decentralizationScore Int?    // 0-100 decentralisation methodology score
+
+  // ── Phase 4: suspicious activity ─────────────────────────────────────────
+  suspiciousFlags String[] // machine-readable flags e.g. "post_vuln_upgrade", "new_account_upgrader"
+  isSuspicious    Boolean  @default(false)
+  riskLevel       String?  // "none" | "low" | "medium" | "high" | "critical"
+
   contract Contract @relation(fields: [contractAddress], references: [address])
 
   @@index([contractAddress, ledgerSequence])
   @@index([ledgerSequence])
+  @@index([isSuspicious])
+  @@index([changeClassification])
 }
 
 model Transaction {
@@ -1918,221 +1946,555 @@ model StellarNetworkHealth {
   @@map("stellar_network_health")
 }
 
-// ── Cross-Contract Composability Analyzer ────────────────────────────────────
+// ─── MEV Classification Engine (Issue #331) ───────────────────────────────
 
-enum RiskLevel {
-  safe
-  low_risk
-  medium_risk
-  high_risk
-  critical
+enum MevType {
+  sandwich
+  flash_loan_attack
+  backrunning
+  displacement
+  jit_liquidity
+  cex_dex_arbitrage
+  cross_dex_arbitrage
+  liquidation
+  nft_mev
 }
 
-enum AnalysisStatus {
-  pending
-  analyzing
-  completed
-  failed
+enum MevAlertType {
+  sandwich_in_progress
+  sandwich_detected
+  mev_spike
+  protocol_targeted
+  user_victim
 }
 
-enum ComposabilityAlertSeverity {
+enum MevSeverity {
   critical
   high
   medium
   low
 }
 
-model ComposedTransaction {
-  id             String         @id @default(cuid())
-  txHash         String         @unique
-  ledgerSeq      Int
-  timestamp      DateTime
-  contractCalls  Json?          // [{from, to, method, args}]
-  callGraph      Json?          // {nodes:[...], edges:[...]}
-  safetyScore    Float?
-  riskLevel      RiskLevel?
-  analysisStatus AnalysisStatus @default(pending)
-  createdAt      DateTime       @default(now())
-
-  patterns CompositionPatternInstance[]
-
-  @@index([txHash])
-  @@index([ledgerSeq])
-  @@index([riskLevel])
-  @@index([analysisStatus])
-}
-
-model CompositionPattern {
+model MevEvent {
   id              String    @id @default(cuid())
-  name            String    @unique
-  description     String
-  category        String    // flash_loan | arbitrage | leverage | collateral_swap | multi_dex
-  riskRating      RiskLevel @default(medium_risk)
-  requiredCalls   Int       @default(2)
-  detectionRules  Json?
-  safeIf          Json?
-  mitigationGuide String?
+  txHash          String    @unique
+  ledgerSeq       Int
+  timestamp       DateTime
+  mevType         MevType
+  victimAddress   String?
+  attackerAddress String?
+  protocolAddress String?
+  tokenIn         String?
+  tokenOut        String?
+  amountIn        String?
+  amountOut       String?
+  profitAmount    String?
+  profitUsd       Float?
+  lossAmount      String?
+  lossUsd         Float?
+  txOrder         Json?
+  confidence      Float
+  details         Json?
   createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
 
-  instances CompositionPatternInstance[]
-  alerts    CompositionAlert[]
+  victim   MevVictim?   @relation(fields: [victimAddress], references: [address])
+  attacker MevAttacker? @relation(fields: [attackerAddress], references: [address])
 
-  @@index([category])
-  @@index([riskRating])
-}
-
-model CompositionPatternInstance {
-  id          String   @id @default(cuid())
-  txId        String
-  patternId   String
-  confidence  Float
-  details     Json?
-  createdAt   DateTime @default(now())
-
-  transaction ComposedTransaction @relation(fields: [txId], references: [id])
-  pattern     CompositionPattern  @relation(fields: [patternId], references: [id])
-
-  @@index([txId])
-  @@index([patternId])
-}
-
-model ContractComposability {
-  id                  String   @id @default(cuid())
-  contractId          String
-  contractAddress     String   @unique
-  composedWith        Json?    // [{address, name, callCount}]
-  compositionCount    Int      @default(0)
-  uniqueCallers       Int      @default(0)
-  uniqueCallees       Int      @default(0)
-  avgCompositionDepth Float?
-  safetyScoreAvg      Float?
-  riskIncidents       Int      @default(0)
-  lastAnalyzed        DateTime @default(now())
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-
-  @@index([contractAddress])
-  @@index([riskIncidents])
-  @@index([safetyScoreAvg])
-}
-
-model CompositionAlert {
-  id              String                     @id @default(cuid())
-  txHash          String?
-  contractAddress String?
-  patternId       String?
-  severity        ComposabilityAlertSeverity
-  title           String
-  description     String
-  exploitDetected Boolean                    @default(false)
-  mitigated       Boolean                    @default(false)
-  mitigationPatch Json?
-  createdAt       DateTime                   @default(now())
-  resolvedAt      DateTime?
-
-  pattern CompositionPattern? @relation(fields: [patternId], references: [id])
-
-  @@index([txHash])
-  @@index([contractAddress])
-  @@index([severity])
-  @@index([exploitDetected])
+  @@index([mevType])
+  @@index([ledgerSeq])
+  @@index([victimAddress])
+  @@index([attackerAddress])
+  @@index([protocolAddress])
   @@index([createdAt])
 }
 
-// Static analysis result per contract address
-model ComposabilityStaticAnalysis {
-  id              String   @id @default(cuid())
-  contractAddress String   @unique
-  externalCalls   Json?    // [{callee, method, isDynamic}]
-  callGraph       Json?    // {nodes, edges}
-  circularDeps    Json?    // [[addr1, addr2, ...], ...]
-  hasUnboundedRecursion Boolean @default(false)
-  maxCallDepth    Int      @default(0)
-  analysisVersion String   @default("1.0")
-  analyzedAt      DateTime @default(now())
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+model MevVictim {
+  id              String    @id @default(cuid())
+  address         String    @unique
+  totalLossUsd    Float     @default(0)
+  incidentCount   Int       @default(0)
+  lastIncidentAt  DateTime?
+  firstIncidentAt DateTime?
+  protectionScore Float?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  @@index([contractAddress])
-  @@index([analyzedAt])
+  events MevEvent[]
+
+  @@index([address])
 }
 
-// Formal verification result per transaction composition
-model ComposabilityVerification {
-  id             String   @id @default(cuid())
-  txHash         String   @unique
-  atomicity      Boolean  @default(false)
-  authorization  Boolean  @default(false)
-  stateConsistency Boolean @default(false)
-  reentrancyFree Boolean  @default(false)
-  oracleFreshness Boolean @default(false)
-  atomicityScore    Float  @default(0)
-  authorizationScore Float @default(0)
-  stateScore        Float  @default(0)
-  reentrancyScore   Float  @default(0)
-  oracleScore       Float  @default(0)
-  totalScore        Float  @default(0)
-  proofData      Json?    // formal proof or counterexample details
-  verified       Boolean  @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+model MevAttacker {
+  id             String    @id @default(cuid())
+  address        String    @unique
+  totalProfitUsd Float     @default(0)
+  attackCount    Int       @default(0)
+  favoriteType   MevType?
+  lastAttackAt   DateTime?
+  firstSeen      DateTime?
+  isContract     Boolean   @default(false)
+  tags           Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  @@index([txHash])
-  @@index([verified])
-  @@index([totalScore])
+  events MevEvent[]
+
+  @@index([address])
+  @@index([totalProfitUsd])
 }
 
-// Fuzzing campaign tracking
-model ComposabilityFuzzCampaign {
-  id              String   @id @default(cuid())
-  contractAddress String
-  status          String   @default("running") // running | completed | failed
-  totalCases      Int      @default(0)
-  unsafeFound     Int      @default(0)
-  falsePositives  Int      @default(0)
-  coveragePct     Float    @default(0)
-  findings        Json?    // [{sequence, risk, description}]
-  startedAt       DateTime @default(now())
-  completedAt     DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+model ProtocolMevResistance {
+  id              String    @id @default(cuid())
+  contractAddress String    @unique
+  contractName    String?
+  score           Float     @default(50)
+  commitReveal    Boolean   @default(false)
+  batchAuctions   Boolean   @default(false)
+  slippageDefault Float?
+  privateMempool  Boolean   @default(false)
+  encryptedTxs    Boolean   @default(false)
+  mevExtractedUsd Float     @default(0)
+  totalIncidents  Int       @default(0)
+  lastIncidentAt  DateTime?
+  scoreHistory    Json?
+  recommendations Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([contractAddress])
+  @@index([score])
+}
+
+model MevAlert {
+  id                String        @id @default(cuid())
+  alertType         MevAlertType
+  severity          MevSeverity
+  txHash            String?
+  victimAddress     String?
+  protocolAddress   String?
+  title             String
+  description       String
+  estimatedLoss     Float?
+  recommendedAction String?
+  acknowledged      Boolean       @default(false)
+  createdAt         DateTime      @default(now())
+  resolvedAt        DateTime?
+
+  @@index([alertType])
+  @@index([severity])
+  @@index([victimAddress])
+  @@index([acknowledged])
+  @@index([createdAt])
+}
+
+// ─── Developer API Console & Key Management (#330) ───────────────────────────
+
+enum DeveloperRole {
+  admin
+  user
+  read_only
+  restricted
+}
+
+enum KeyStatus {
+  active
+  revoked
+  expired
+  suspended
+}
+
+enum DeliveryStatus {
+  success
+  failed
+  retrying
+}
+
+model BillingPlan {
+  id            String   @id @default(cuid())
+  name          String   @unique   // "free" | "developer" | "pro" | "enterprise"
+  requestsPerDay Int
+  requestsPerMonth Int
+  priceMonthly  Float    @default(0)
+  features      Json     @default("{}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  developers    Developer[]
+}
+
+model Developer {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  name          String?
+  passwordHash  String?
+  githubId      String?        @unique
+  walletAddress String?
+  planId        String?
+  plan          BillingPlan?   @relation(fields: [planId], references: [id])
+  role          DeveloperRole  @default(user)
+  emailVerified Boolean        @default(false)
+  mfaEnabled    Boolean        @default(false)
+  mfaSecret     String?
+  devApiKeys    DevApiKey[]
+  devWebhooks   DevWebhook[]
+  usageRecords  UsageRecord[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([email])
+}
+
+model DevApiKey {
+  id             String     @id @default(cuid())
+  developerId    String
+  developer      Developer  @relation(fields: [developerId], references: [id])
+  keyPrefix      String
+  keyHash        String
+  name           String
+  permissions    Json       @default("{}")
+  allowedIps     Json?
+  allowedDomains Json?
+  expiresAt      DateTime?
+  lastUsedAt     DateTime?
+  status         KeyStatus  @default(active)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  usageRecords   UsageRecord[]
+
+  @@index([developerId])
+  @@index([keyPrefix])
   @@index([status])
 }
 
-// Exploit database entries
-model ComposabilityExploit {
-  id               String   @id @default(cuid())
-  title            String
-  description      String
-  patternCategory  String   // flash_loan | reentrancy | oracle_manip | etc
-  cveId            String?
-  affectedContracts String[]
-  exploitTxHashes  String[]
-  advisoryUrl      String?
-  severity         ComposabilityAlertSeverity
-  discoveredAt     DateTime @default(now())
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+model DevWebhook {
+  id                 String          @id @default(cuid())
+  developerId        String
+  developer          Developer       @relation(fields: [developerId], references: [id])
+  url                String
+  secret             String
+  events             Json            @default("[]")
+  retryPolicy        Json?
+  headers            Json?
+  active             Boolean         @default(true)
+  lastDeliveryAt     DateTime?
+  lastDeliveryStatus DeliveryStatus?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
 
-  @@index([patternCategory])
-  @@index([severity])
-  @@index([discoveredAt])
+  devDeliveries      DevWebhookDelivery[]
+
+  @@index([developerId])
 }
 
-// Ecosystem Composability Index — daily snapshots
-model EcosystemComposabilityIndex {
-  id                  String   @id @default(cuid())
-  score               Float    // 0-1000
-  compositionDiversity Int     @default(0)
-  avgSafetyScore      Float    @default(0)
-  exploitIncidentRate Float    @default(0)
-  protocolInterconnectivity Float @default(0)
-  totalContracts      Int      @default(0)
-  totalComposedTx     Int      @default(0)
-  computedAt          DateTime @default(now())
+model DevWebhookDelivery {
+  id           String      @id @default(cuid())
+  webhookId    String
+  webhook      DevWebhook  @relation(fields: [webhookId], references: [id])
+  eventType    String
+  payload      Json
+  statusCode   Int?
+  responseBody String?
+  durationMs   Int?
+  attempt      Int         @default(1)
+  delivered    Boolean     @default(false)
+  deliveredAt  DateTime?
+  createdAt    DateTime    @default(now())
 
-  @@index([computedAt])
+  @@index([webhookId])
+  @@index([delivered])
 }
+
+model UsageRecord {
+  id          String     @id @default(cuid())
+  developerId String
+  developer   Developer  @relation(fields: [developerId], references: [id])
+  apiKeyId    String?
+  apiKey      DevApiKey? @relation(fields: [apiKeyId], references: [id])
+  endpoint    String
+  method      String
+  statusCode  Int
+  latencyMs   Int        @default(0)
+  ipAddress   String?
+  createdAt   DateTime   @default(now())
+
+  @@index([developerId])
+  @@index([apiKeyId])
+  @@index([createdAt])
+  @@index([endpoint])
+}
+
+// ─── End Developer API Console & Key Management ───────────────────────────────
+
+// ─── Soroban Temporal Orchestrator (Issue #310) ───────────────────────────────
+
+enum TimerType {
+  TIMELOCK
+  VESTING
+  DEADLINE
+  COOLDOWN
+  RECURRING
+  TIME_WEIGHTED
+  MULTI_STAGE
+  ABSOLUTE
+}
+
+enum TimerStatus {
+  PENDING
+  ACTIVE
+  EXECUTED
+  EXPIRED
+  CANCELLED
+  FAILED
+}
+
+model ScheduledOperation {
+  id              String      @id @default(cuid())
+  contractAddress String      @map("contract_address")
+  timerType       TimerType   @map("timer_type")
+  status          TimerStatus
+  functionName    String      @map("function_name")
+  description     String?
+  triggerTime     DateTime    @map("trigger_time")
+  windowStart     DateTime?   @map("window_start")
+  windowEnd       DateTime?   @map("window_end")
+  intervalSeconds Int?        @map("interval_seconds")
+  recurrenceCount Int?        @map("recurrence_count")
+  eventsExecuted  Int         @default(0) @map("events_executed")
+  parameters      Json?
+  sourceTx        String?     @map("source_tx")
+  createdBy       String?     @map("created_by")
+  detectedAt      DateTime    @map("detected_at")
+  lastExecutedAt  DateTime?   @map("last_executed_at")
+  nextTriggerAt   DateTime?   @map("next_trigger_at")
+
+  @@index([contractAddress])
+  @@index([timerType])
+  @@index([status])
+  @@index([nextTriggerAt])
+  @@index([triggerTime])
+  @@map("scheduled_operations")
+}
+
+model VestingSchedule {
+  id               String    @id @default(cuid())
+  contractAddress  String    @map("contract_address")
+  tokenAddress     String    @map("token_address")
+  tokenSymbol      String?   @map("token_symbol")
+  beneficiary      String
+  totalAmount      Decimal   @map("total_amount")
+  cliffDate        DateTime? @map("cliff_date")
+  cliffAmount      Decimal?  @map("cliff_amount")
+  startDate        DateTime  @map("start_date")
+  endDate          DateTime  @map("end_date")
+  vestingType      String    @map("vesting_type")
+  periodSeconds    Int?      @map("period_seconds")
+  amountPerPeriod  Decimal?  @map("amount_per_period")
+  periodsTotal     Int?      @map("periods_total")
+  nextUnlockDate   DateTime? @map("next_unlock_date")
+  nextUnlockAmount Decimal?  @map("next_unlock_amount")
+  totalUnlocked    Decimal   @default(0) @map("total_unlocked")
+  totalClaimed     Decimal   @default(0) @map("total_claimed")
+  status           String
+  sourceTx         String?   @map("source_tx")
+  detectedAt       DateTime  @map("detected_at")
+
+  @@index([beneficiary])
+  @@index([contractAddress])
+  @@index([nextUnlockDate])
+  @@index([status])
+  @@map("vesting_schedules")
+}
+
+model GovernanceTimelock {
+  id              String    @id @default(cuid())
+  contractAddress String    @map("contract_address")
+  proposalId      String?   @map("proposal_id")
+  title           String?
+  description     String?
+  proposer        String
+  executor        String?
+  targets         Json
+  values          Json
+  calldatas       Json
+  operationHash   String?   @map("operation_hash")
+  queuedAt        DateTime  @map("queued_at")
+  minDelay        Int       @map("min_delay")
+  executionTime   DateTime  @map("execution_time")
+  expiryTime      DateTime? @map("expiry_time")
+  status          String
+  executedTx      String?   @map("executed_tx")
+  cancelledBy     String?   @map("cancelled_by")
+  gracePeriod     Int?      @map("grace_period")
+
+  @@index([contractAddress])
+  @@index([status])
+  @@index([executionTime])
+  @@map("governance_timelocks")
+}
+
+model CronJob {
+  id              String    @id @default(cuid())
+  contractAddress String    @map("contract_address")
+  cronExpression  String    @map("cron_expression")
+  functionName    String    @map("function_name")
+  functionArgs    Json      @map("function_args")
+  description     String?
+  lastRunAt       DateTime? @map("last_run_at")
+  nextRunAt       DateTime? @map("next_run_at")
+  totalRuns       Int       @default(0) @map("total_runs")
+  successfulRuns  Int       @default(0) @map("successful_runs")
+  failedRuns      Int       @default(0) @map("failed_runs")
+  maxRuns         Int?      @map("max_runs")
+  enabled         Boolean   @default(true)
+  createdBy       String?   @map("created_by")
+  createdAt       DateTime  @map("created_at")
+
+  executions CronExecution[]
+
+  @@index([contractAddress])
+  @@index([nextRunAt])
+  @@map("cron_jobs")
+}
+
+model CronExecution {
+  id           String   @id @default(cuid())
+  cronJobId    String   @map("cron_job_id")
+  executedAt   DateTime @map("executed_at")
+  success      Boolean
+  txHash       String?  @map("tx_hash")
+  errorMessage String?  @map("error_message")
+  gasUsed      Int?     @map("gas_used")
+  duration     Int?
+
+  cronJob CronJob @relation(fields: [cronJobId], references: [id])
+
+  @@index([cronJobId, executedAt(sort: Desc)])
+  @@map("cron_executions")
+}
+
+model TimerAlert {
+  id            String   @id @default(cuid())
+  scheduledOpId String?  @map("scheduled_op_id")
+  alertType     String   @map("alert_type")
+  severity      String
+  title         String
+  message       String
+  triggerTime   DateTime @map("trigger_time")
+  delivered     Boolean  @default(false)
+  acknowledged  Boolean  @default(false)
+
+  @@index([scheduledOpId])
+  @@index([triggerTime])
+  @@map("timer_alerts")
+}
+
+// ─── End Soroban Temporal Orchestrator ────────────────────────────────────────
+
+// ─── Data Mesh - Multi-Channel Real-Time Streaming Platform ─────────────────
+
+model FeedChannel {
+  id                String   @id @default(cuid())
+  name              String   @unique
+  description       String?
+  category          String   // "transaction" | "event" | "ledger" | "derived"
+  schema            Json     // JSON Schema for the channel data
+  retentionDays     Int      @default(30) @map("retention_days")
+  enabled           Boolean  @default(true)
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@map("feed_channels")
+}
+
+model FeedSubscription {
+  id                String   @id @default(cuid())
+  userId            String?  @map("user_id")
+  channelName       String   @map("channel_name")
+  filters           Json?    // channel-specific filters
+  deliveryType      String   // "webhook" | "websocket" | "sse" | "queue"
+  deliveryConfig    Json     @map("delivery_config")
+  status            String   // "active" | "paused" | "error"
+  batchSize         Int      @default(1) @map("batch_size")
+  maxRatePerSecond  Int?     @map("max_rate_per_second")
+  createdAt         DateTime @default(now()) @map("created_at")
+  lastDeliveryAt    DateTime? @map("last_delivery_at")
+  totalDelivered    Int      @default(0) @map("total_delivered")
+  totalFailed       Int      @default(0) @map("total_failed")
+  lastError         String?  @map("last_error")
+
+  @@index([userId])
+  @@index([channelName])
+  @@index([status])
+  @@map("feed_subscriptions")
+}
+
+model FeedMessage {
+  id              String   @id @default(cuid())
+  channelName     String   @map("channel_name")
+  sequence        BigInt   @unique
+  data            Json
+  dataVersion     Int      @default(1) @map("data_version")
+  ledgerSequence  Int      @map("ledger_sequence")
+  timestamp       DateTime
+  indexedAt       DateTime @default(now()) @map("indexed_at")
+
+  @@index([channelName, sequence])
+  @@index([channelName, timestamp])
+  @@index([ledgerSequence])
+  @@map("feed_messages")
+}
+
+model BackfillRequest {
+  id              String   @id @default(cuid())
+  userId          String?  @map("user_id")
+  channelName     String   @map("channel_name")
+  startTime       DateTime @map("start_time")
+  endTime         DateTime @map("end_time")
+  format          String   // "jsonl" | "csv" | "parquet" | "arrow" | "json"
+  filters         Json?
+  status          String   // "pending" | "processing" | "completed" | "failed"
+  progress        Float    @default(0)
+  fileUrl         String?  @map("file_url")
+  fileSizeBytes   Int?     @map("file_size_bytes")
+  recordCount     Int?     @map("record_count")
+  errorMessage    String?  @map("error_message")
+  createdAt       DateTime @default(now()) @map("created_at")
+  completedAt     DateTime? @map("completed_at")
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([channelName, status])
+  @@map("backfill_requests")
+}
+
+model DerivedMetric {
+  id              String   @id @default(cuid())
+  name            String
+  timestamp       DateTime
+  value           Float
+  metadata        Json?
+  granularity     String   // "1m" | "5m" | "15m" | "1h" | "1d"
+
+  @@index([name, timestamp])
+  @@index([name, granularity, timestamp(sort: Desc)])
+  @@map("derived_metrics")
+}
+
+model MarketDataSnapshot {
+  id              String   @id @default(cuid())
+  tokenAddress    String   @map("token_address")
+  tokenSymbol     String?  @map("token_symbol")
+  timestamp       DateTime
+  priceUsd        Float?   @map("price_usd")
+  volume24h       Decimal? @map("volume_24h")
+  tvl             Decimal?
+  liquidity       Decimal?
+  priceChange1h   Float?   @map("price_change_1h")
+  priceChange24h  Float?   @map("price_change_24h")
+  trades24h       Int?     @map("trades_24h")
+  uniqueTraders24h Int?    @map("unique_traders_24h")
+
+  @@index([tokenAddress, timestamp(sort: Desc)])
+  @@map("market_data_snapshots")
+}
+
+// ─── End Data Mesh Platform ─────────────────────────────────────────────────
