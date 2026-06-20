@@ -575,6 +575,210 @@ const options: swaggerJsdoc.Options = {
             timestamp: { type: 'string', format: 'date-time', example: '2026-06-19T07:24:26.000Z' },
           },
         },
+        // Validation error envelope for routes that parse with zod. The `error`
+        // field is the array of Zod issues (res.json({ error: e.errors })).
+        ZodValidationError: {
+          type: 'object',
+          properties: {
+            error: {
+              type: 'array',
+              description: 'Zod validation issues from the failed parse',
+              items: {
+                type: 'object',
+                properties: {
+                  code: { type: 'string', example: 'invalid_type' },
+                  expected: { type: 'string', example: 'string' },
+                  received: { type: 'string', example: 'undefined' },
+                  path: { type: 'array', items: { type: 'string' }, example: ['txHash'] },
+                  message: { type: 'string', example: 'Required' },
+                },
+              },
+            },
+          },
+        },
+        // A detected MEV event (full MevEvent record).
+        // Field types follow the MevEvent model in prisma/schema.prisma.
+        MevEvent: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'clz9q1x4t0000s6h2mevevt01' },
+            txHash: { type: 'string', example: '3389e9f0f1a4e32477b1c0d9e8a6f5b4c3d2e1f0a9b8c7d6e5f40312233445566' },
+            ledgerSeq: { type: 'integer', example: 3168075 },
+            timestamp: { type: 'string', format: 'date-time', example: '2026-06-19T07:24:26.000Z' },
+            mevType: {
+              type: 'string',
+              enum: ['sandwich', 'flash_loan_attack', 'backrunning', 'displacement', 'jit_liquidity', 'cex_dex_arbitrage', 'cross_dex_arbitrage', 'liquidation', 'nft_mev'],
+              example: 'sandwich',
+            },
+            victimAddress: { type: 'string', nullable: true, example: 'GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI' },
+            attackerAddress: { type: 'string', nullable: true, example: 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN' },
+            protocolAddress: { type: 'string', nullable: true, example: 'CALLD5GHXR4QSTKHSWQEK4UVMHM4QHU4KZ5G4SBKWY7C7TXKZ45RJ4M5' },
+            tokenIn: { type: 'string', nullable: true, example: 'USDC' },
+            tokenOut: { type: 'string', nullable: true, example: 'XLM' },
+            amountIn: { type: 'string', nullable: true, description: 'Raw amount in base units', example: '1000000000' },
+            amountOut: { type: 'string', nullable: true, example: '987000000' },
+            profitAmount: { type: 'string', nullable: true, example: '15240000' },
+            profitUsd: { type: 'number', nullable: true, example: 152.4 },
+            lossAmount: { type: 'string', nullable: true, example: '18060000' },
+            lossUsd: { type: 'number', nullable: true, example: 180.6 },
+            txOrder: {
+              type: 'object',
+              nullable: true,
+              description: 'Bundle ordering (front-run, victim, back-run tx hashes)',
+              example: { frontRun: '3389e9f0...', victim: 'a1b2c3d4...', backRun: '9f8e7d6c...' },
+            },
+            confidence: { type: 'number', description: 'Detection confidence (0-1)', example: 0.95 },
+            details: {
+              type: 'object',
+              nullable: true,
+              description: 'Detector-specific metadata',
+              example: { pool: 'CALLD5GHXR4QSTKHSWQEK4UVMHM4QHU4KZ5G4SBKWY7C7TXKZ45RJ4M5', slippage: 0.05 },
+            },
+            createdAt: { type: 'string', format: 'date-time', example: '2026-06-19T07:24:27.000Z' },
+          },
+        },
+        // An address harmed by MEV (full MevVictim record).
+        MevVictim: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'clz9q1x4t0000s6h2victim01' },
+            address: { type: 'string', example: 'GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI' },
+            totalLossUsd: { type: 'number', example: 180.6 },
+            incidentCount: { type: 'integer', example: 3 },
+            lastIncidentAt: { type: 'string', format: 'date-time', nullable: true, example: '2026-06-19T07:24:26.000Z' },
+            firstIncidentAt: { type: 'string', format: 'date-time', nullable: true, example: '2026-06-01T00:00:00.000Z' },
+            protectionScore: { type: 'number', nullable: true, example: 50 },
+            createdAt: { type: 'string', format: 'date-time', example: '2026-06-01T00:00:00.000Z' },
+            updatedAt: { type: 'string', format: 'date-time', example: '2026-06-19T07:24:27.000Z' },
+          },
+        },
+        // An address (or contract) that extracts MEV (full MevAttacker record).
+        MevAttacker: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'clz9q1x4t0000s6h2attack01' },
+            address: { type: 'string', example: 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN' },
+            totalProfitUsd: { type: 'number', example: 1520.4 },
+            attackCount: { type: 'integer', example: 42 },
+            favoriteType: {
+              type: 'string',
+              nullable: true,
+              enum: ['sandwich', 'flash_loan_attack', 'backrunning', 'displacement', 'jit_liquidity', 'cex_dex_arbitrage', 'cross_dex_arbitrage', 'liquidation', 'nft_mev'],
+              example: 'sandwich',
+            },
+            lastAttackAt: { type: 'string', format: 'date-time', nullable: true, example: '2026-06-19T07:24:26.000Z' },
+            firstSeen: { type: 'string', format: 'date-time', nullable: true, example: '2026-06-01T00:00:00.000Z' },
+            isContract: { type: 'boolean', example: true },
+            tags: { type: 'array', items: { type: 'string' }, nullable: true, example: ['known-bot'] },
+            createdAt: { type: 'string', format: 'date-time', example: '2026-06-01T00:00:00.000Z' },
+            updatedAt: { type: 'string', format: 'date-time', example: '2026-06-19T07:24:27.000Z' },
+          },
+        },
+        // A protocol's MEV-resistance profile (full ProtocolMevResistance record).
+        ProtocolMevResistance: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'clz9q1x4t0000s6h2protmev1' },
+            contractAddress: { type: 'string', example: 'CALLD5GHXR4QSTKHSWQEK4UVMHM4QHU4KZ5G4SBKWY7C7TXKZ45RJ4M5' },
+            contractName: { type: 'string', nullable: true, example: 'StellarSwap Router' },
+            score: { type: 'number', description: 'MEV-resistance score (0-100)', example: 72.5 },
+            commitReveal: { type: 'boolean', example: false },
+            batchAuctions: { type: 'boolean', example: true },
+            slippageDefault: { type: 'number', nullable: true, example: 0.005 },
+            privateMempool: { type: 'boolean', example: false },
+            encryptedTxs: { type: 'boolean', example: false },
+            mevExtractedUsd: { type: 'number', example: 12500.5 },
+            totalIncidents: { type: 'integer', example: 37 },
+            lastIncidentAt: { type: 'string', format: 'date-time', nullable: true, example: '2026-06-19T07:24:26.000Z' },
+            scoreHistory: {
+              type: 'array',
+              nullable: true,
+              items: { type: 'object' },
+              description: 'Score samples over time',
+              example: [{ score: 70, timestamp: '2026-06-01T00:00:00.000Z' }, { score: 72.5, timestamp: '2026-06-19T07:24:26.000Z' }],
+            },
+            recommendations: {
+              type: 'array',
+              nullable: true,
+              items: { type: 'string' },
+              example: ['Enable batch auctions', 'Lower default slippage'],
+            },
+            createdAt: { type: 'string', format: 'date-time', example: '2026-06-01T00:00:00.000Z' },
+            updatedAt: { type: 'string', format: 'date-time', example: '2026-06-19T07:24:27.000Z' },
+          },
+        },
+        // An MEV alert (full MevAlert record).
+        MevAlert: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'clz9q1x4t0000s6h2mevalrt1' },
+            alertType: {
+              type: 'string',
+              enum: ['sandwich_in_progress', 'sandwich_detected', 'mev_spike', 'protocol_targeted', 'user_victim'],
+              example: 'sandwich_detected',
+            },
+            severity: { type: 'string', enum: ['critical', 'high', 'medium', 'low'], example: 'high' },
+            txHash: { type: 'string', nullable: true, example: '3389e9f0f1a4e32477b1c0d9e8a6f5b4c3d2e1f0a9b8c7d6e5f40312233445566' },
+            victimAddress: { type: 'string', nullable: true, example: 'GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI' },
+            protocolAddress: { type: 'string', nullable: true, example: 'CALLD5GHXR4QSTKHSWQEK4UVMHM4QHU4KZ5G4SBKWY7C7TXKZ45RJ4M5' },
+            title: { type: 'string', example: 'Sandwich attack detected' },
+            description: { type: 'string', example: 'Victim swap was front-run and back-run on the same pool' },
+            estimatedLoss: { type: 'number', nullable: true, example: 180.6 },
+            recommendedAction: { type: 'string', nullable: true, example: 'Route transaction through private mempool' },
+            acknowledged: { type: 'boolean', example: false },
+            createdAt: { type: 'string', format: 'date-time', example: '2026-06-19T07:24:26.000Z' },
+            resolvedAt: { type: 'string', format: 'date-time', nullable: true, example: null },
+          },
+        },
+        // Aggregate MEV summary (MevOverview from mev-classifier.ts).
+        MevOverview: {
+          type: 'object',
+          properties: {
+            totalEvents: { type: 'integer', example: 1543 },
+            totalProfitUsd: { type: 'number', example: 84250.75 },
+            totalLossUsd: { type: 'number', example: 91200.4 },
+            byType: {
+              type: 'object',
+              description: 'Per-type event counts',
+              example: { sandwich: 820, cross_dex_arbitrage: 410, flash_loan_attack: 95 },
+            },
+            topAttackers: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  address: { type: 'string', example: 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN' },
+                  totalProfitUsd: { type: 'number', example: 1520.4 },
+                  attackCount: { type: 'integer', example: 42 },
+                },
+              },
+            },
+            topVictims: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  address: { type: 'string', example: 'GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI' },
+                  totalLossUsd: { type: 'number', example: 180.6 },
+                  incidentCount: { type: 'integer', example: 3 },
+                },
+              },
+            },
+            recentEvents: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string', example: 'clz9q1x4t0000s6h2mevevt01' },
+                  txHash: { type: 'string', example: '3389e9f0f1a4e32477b1c0d9e8a6f5b4c3d2e1f0a9b8c7d6e5f40312233445566' },
+                  mevType: { type: 'string', example: 'sandwich' },
+                  confidence: { type: 'number', example: 0.95 },
+                  createdAt: { type: 'string', format: 'date-time', example: '2026-06-19T07:24:26.000Z' },
+                },
+              },
+            },
+          },
+        },
       },
     },
     security: [{ ApiKeyAuth: [] }],
