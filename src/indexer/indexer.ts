@@ -10,6 +10,7 @@ import {
   type LedgerEvent,
 } from './rpc';
 import { decodeTransaction, decodeEvent } from './decoder';
+import { processAaTransaction } from './aa-indexer';
 import { feedOrchestrator } from '../feed/orchestrator';
 
 const BATCH = config.indexerBatchSize;
@@ -81,6 +82,20 @@ async function processLedgerRange(start: number, end: number) {
           feeCharged: String((txResult as any)?.feeCharged ?? ''),
         },
       });
+
+      // Trigger Account Abstraction processing (non-blocking)
+      try {
+        void processAaTransaction(
+          transaction.hash,
+          transaction.sourceAccount,
+          rawXdr,
+          transaction.ledgerSequence,
+          transaction.ledgerCloseTime,
+          transaction.feeCharged ?? undefined,
+        );
+      } catch (err) {
+        console.error('AA processing error:', err);
+      }
 
       // Publish to feed
       await feedOrchestrator.publishTransaction(transaction).catch(console.error);
