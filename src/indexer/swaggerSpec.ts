@@ -29,6 +29,7 @@ const options: swaggerJsdoc.Options = {
       { name: 'Protocol', description: 'Protocol version and reconciliation' },
       { name: 'i18n', description: 'Internationalization translation management' },
       { name: 'Threat Intelligence', description: 'Advisories, review workflow, subscriptions, webhooks, RSS/JSON feeds, analytics, and source management' },
+      { name: 'Sandbox', description: 'In-memory Soroban sandbox for developing and testing smart contracts locally. Live VM state is kept in memory; sessions persist to the database.' },
     ],
     components: {
       securitySchemes: {
@@ -1528,6 +1529,206 @@ const options: swaggerJsdoc.Options = {
                 },
               },
             },
+          },
+        },
+        // ── Sandbox (#251) ────────────────────────────────────────────────────
+        // Summary of an in-memory sandbox session (SessionSummary from runtime.ts).
+        SandboxSession: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'clz9q1x4t0000s6h2sbox0001' },
+            status: { type: 'string', description: 'active | paused | destroyed', example: 'active' },
+            ledgerSequence: { type: 'integer', example: 1 },
+            ledgerTimestamp: { type: 'string', format: 'date-time', example: '2026-06-23T00:00:00.000Z' },
+            networkPassphrase: { type: 'string', example: 'Public Global Stellar Network ; September 2015' },
+            expiresAt: { type: 'string', format: 'date-time', example: '2026-06-23T04:00:00.000Z' },
+            createdAt: { type: 'string', format: 'date-time', example: '2026-06-23T00:00:00.000Z' },
+            lastAccessed: { type: 'string', format: 'date-time', example: '2026-06-23T00:00:00.000Z' },
+            accountCount: { type: 'integer', example: 20 },
+            contractCount: { type: 'integer', example: 0 },
+            callCount: { type: 'integer', example: 0 },
+            snapshotCount: { type: 'integer', example: 0 },
+          },
+        },
+        // A built-in or user-submitted sandbox contract template (SandboxTemplate from runtime.ts).
+        SandboxTemplate: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'sep41-token' },
+            name: { type: 'string', example: 'SEP-41 Token' },
+            description: { type: 'string', example: 'Standard token with mint, burn, pause, and transfer flows.' },
+            category: { type: 'string', description: 'token | dex | nft | wallet | governance | auction', example: 'token' },
+            wasmBase64: { type: 'string', description: 'Base64-encoded Wasm bytecode', example: 'AGFzbQEAAAA=' },
+            abi: { type: 'object', description: 'Function list for the template', example: { functions: [{ name: 'mint', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'i128' }] }] } },
+            defaultArgs: { type: 'object', description: 'Default constructor arguments', example: { decimals: 7, name: 'Sandbox Token', symbol: 'SBX' } },
+            deploymentGuide: { type: 'string', example: 'Deploy and call initialize, then mint and transfer.' },
+            version: { type: 'string', example: '1.0.0' },
+            author: { type: 'string', example: 'Copilot' },
+          },
+        },
+        // Template deployment parameters (getTemplateParams result from runtime.ts).
+        SandboxTemplateParams: {
+          type: 'object',
+          properties: {
+            templateId: { type: 'string', example: 'sep41-token' },
+            category: { type: 'string', example: 'token' },
+            parameters: { type: 'object', description: 'Default constructor arguments', example: { decimals: 7 } },
+            abi: { type: 'object', example: { functions: [] } },
+            deploymentGuide: { type: 'string', example: 'Deploy and call initialize, then mint.' },
+          },
+        },
+        // A sandbox account (AccountState from runtime.ts).
+        SandboxAccount: {
+          type: 'object',
+          properties: {
+            publicKey: { type: 'string', example: 'GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI' },
+            label: { type: 'string', nullable: true, example: 'deployer' },
+            balance: { type: 'string', description: 'Decimal balance in base units', example: '10000' },
+            sequenceNumber: { type: 'integer', example: 0 },
+            isPreFunded: { type: 'boolean', example: true },
+          },
+        },
+        // A deployed sandbox contract (ContractState from runtime.ts).
+        SandboxContract: {
+          type: 'object',
+          properties: {
+            contractId: { type: 'string', example: 'CALLD5GHXR4QSTKHSWQEK4UVMHM4QHU4KZ5G4SBKWY7C7TXKZ45RJ4M5' },
+            name: { type: 'string', nullable: true, example: 'MyToken' },
+            wasmHash: { type: 'string', example: 'e5f40312233445566778899aabbccddeeff00112233445566778899aabbccddee' },
+            deployerAccount: { type: 'string', example: 'GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI' },
+            sourceContract: { type: 'string', nullable: true, example: null },
+            templateId: { type: 'string', nullable: true, example: 'sep41-token' },
+            deployedAt: { type: 'string', format: 'date-time', example: '2026-06-23T00:00:00.000Z' },
+            lastCalledAt: { type: 'string', format: 'date-time', nullable: true, example: null },
+            totalCalls: { type: 'integer', example: 0 },
+            abi: { type: 'object', example: { functions: [] } },
+            state: { type: 'object', description: 'Current contract storage state', example: { totalSupply: '0', balances: {} } },
+          },
+        },
+        // Result of a sandbox contract call. success=true includes a metrics object;
+        // success=false includes a callId and top-level resource fields.
+        SandboxCallResult: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean', example: true },
+            result: { nullable: true, description: 'Return value from the function', example: { transferred: '1000000000' } },
+            error: { type: 'string', nullable: true, description: 'Error message when success is false', example: null },
+            events: {
+              type: 'array',
+              items: { type: 'object' },
+              example: [{ type: 'transfer', from: 'GBZX...', to: 'GAAZ...', amount: '1000000000' }],
+            },
+            trace: { type: 'array', items: { type: 'object' }, description: 'Host-function execution trace steps', example: [] },
+            stateBefore: { type: 'object', description: 'Contract storage before the call', example: { totalSupply: '0' } },
+            stateAfter: { type: 'object', description: 'Contract storage after the call', example: { totalSupply: '1000000000' } },
+            metrics: {
+              type: 'object',
+              nullable: true,
+              description: 'Resource usage (present when success is true)',
+              properties: {
+                cpuInsnUsed: { type: 'integer', example: 2250 },
+                memBytesUsed: { type: 'integer', example: 2048 },
+                readBytes: { type: 'integer', example: 256 },
+                writeBytes: { type: 'integer', example: 512 },
+              },
+            },
+            callId: { type: 'string', nullable: true, description: 'DB record ID (present when success is false)', example: null },
+          },
+        },
+        // A sandbox session snapshot (SandboxSnapshot Prisma record).
+        SandboxSnapshot: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'clz9q1x4t0000s6h2snap0001' },
+            sessionId: { type: 'string', example: 'clz9q1x4t0000s6h2sbox0001' },
+            name: { type: 'string', example: 'after-deploy' },
+            state: { type: 'object', description: 'Full runtime block captured at snapshot time', example: { ledgerSequence: 5, accounts: {}, contracts: {} } },
+            createdAt: { type: 'string', format: 'date-time', example: '2026-06-23T00:00:00.000Z' },
+          },
+        },
+        // A fuzz run record (FuzzRun Prisma record from runtime.ts).
+        FuzzRun: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'clz9q1x4t0000s6h2fuzz0001' },
+            sessionId: { type: 'string', example: 'clz9q1x4t0000s6h2sbox0001' },
+            contractId: { type: 'string', example: 'CALLD5GHXR4QSTKHSWQEK4UVMHM4QHU4KZ5G4SBKWY7C7TXKZ45RJ4M5' },
+            status: { type: 'string', description: 'running | completed | cancelled', example: 'completed' },
+            strategies: { type: 'array', items: { type: 'object' }, example: [{ type: 'known_attack', iterations: 100 }] },
+            totalIterations: { type: 'integer', example: 100 },
+            uniqueFindings: { type: 'integer', example: 3 },
+            startedAt: { type: 'string', format: 'date-time', example: '2026-06-23T00:00:00.000Z' },
+            completedAt: { type: 'string', format: 'date-time', nullable: true, example: '2026-06-23T00:00:01.000Z' },
+          },
+        },
+        // A single finding from a fuzz run (FuzzFinding Prisma record from runtime.ts).
+        FuzzFinding: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'clz9q1x4t0000s6h2find0001' },
+            fuzzRunId: { type: 'string', example: 'clz9q1x4t0000s6h2fuzz0001' },
+            severity: { type: 'string', description: 'critical | error | warning | info', example: 'critical' },
+            title: { type: 'string', example: 'Potential access-control bypass' },
+            description: { type: 'string', example: 'Template accepts privileged functions without an admin gate.' },
+            callSequence: { type: 'array', items: { type: 'object' }, example: [{ function: 'initialize' }, { function: 'mint' }] },
+            stateDump: { type: 'object', description: 'Contract storage state at the time of the finding', example: { totalSupply: '0' } },
+            reproducible: { type: 'boolean', example: true },
+            createdAt: { type: 'string', format: 'date-time', example: '2026-06-23T00:00:00.000Z' },
+          },
+        },
+        // Result envelope returned by POST /ci/execute (executeCi from runtime.ts).
+        SandboxCiResult: {
+          type: 'object',
+          properties: {
+            runId: { type: 'string', example: 'clz9q1x4t0000s6h2cirun001' },
+            passed: { type: 'boolean', example: true },
+            failure: { type: 'string', nullable: true, description: 'First assertion failure message, or null', example: null },
+            results: { type: 'array', items: { type: 'object' }, description: 'Per-step output', example: [] },
+            logs: { type: 'array', items: { type: 'object' }, example: [{ action: 'deploy', contractId: 'CALLD...' }] },
+          },
+        },
+        // A view-only session share link (SandboxShare Prisma record).
+        SandboxShare: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'clz9q1x4t0000s6h2share001' },
+            sessionId: { type: 'string', example: 'clz9q1x4t0000s6h2sbox0001' },
+            shareId: { type: 'string', format: 'uuid', example: '550e8400-e29b-41d4-a716-446655440000' },
+            viewOnly: { type: 'boolean', example: true },
+            snapshotState: { type: 'object', description: 'Runtime state at share creation time' },
+            expiresAt: { type: 'string', format: 'date-time', nullable: true, example: null },
+            createdAt: { type: 'string', format: 'date-time', example: '2026-06-23T00:00:00.000Z' },
+          },
+        },
+        // Optimization suggestions returned by POST /optimize (optimizeContract from runtime.ts).
+        SandboxOptimizeResult: {
+          type: 'object',
+          properties: {
+            recommendations: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  type: { type: 'string', example: 'storage' },
+                  severity: { type: 'string', example: 'medium' },
+                  message: { type: 'string', example: 'Cache frequently-read values locally before repeated reads.' },
+                  estimatedSavings: { type: 'string', example: '500 CPU' },
+                },
+              },
+            },
+            totalEstimatedSavings: { type: 'string', example: '1500 CPU / 64KB memory' },
+            hotPaths: { type: 'array', items: { type: 'string' }, example: ['MyToken: 40% of total gas'] },
+          },
+        },
+        // Invariant or assertion verification result (verifyInvariant from runtime.ts).
+        SandboxVerifyResult: {
+          type: 'object',
+          properties: {
+            passed: { type: 'boolean', example: true },
+            checker: { type: 'string', description: 'Verification checker used (e.g. smt)', example: 'smt' },
+            invariant: { type: 'string', example: 'balance <= totalSupply' },
+            counterexample: { type: 'object', nullable: true, description: 'Failing counterexample when passed is false', example: null },
+            bound: { type: 'object', nullable: true, description: 'Bound constraints passed in the request', example: null },
           },
         },
       },
