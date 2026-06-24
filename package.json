@@ -35,7 +35,8 @@
     "prepare": "husky",
     "validate-routes": "ts-node scripts/validate-routes.ts",
     "test:routes": "vitest run tests/orphaned-routers-integration.test.ts",
-    "lint:errors": "eslint src/api"
+    "lint:errors": "eslint src/api",
+    "doc-coverage": "ts-node scripts/doc-coverage.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"

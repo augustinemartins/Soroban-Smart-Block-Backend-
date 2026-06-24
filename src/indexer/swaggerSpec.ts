@@ -27,6 +27,7 @@ const options: swaggerJsdoc.Options = {
       { name: 'Network', description: 'Network protocol status' },
       { name: 'Token Metadata', description: 'Token metadata resolution' },
       { name: 'Protocol', description: 'Protocol version and reconciliation' },
+      { name: 'Analytics', description: 'Gas cost snapshots and protocol economic analytics' },
       { name: 'i18n', description: 'Internationalization translation management' },
       { name: 'Threat Intelligence', description: 'Advisories, review workflow, subscriptions, webhooks, RSS/JSON feeds, analytics, and source management' },
       { name: 'Sandbox', description: 'In-memory Soroban sandbox for developing and testing smart contracts locally. Live VM state is kept in memory; sessions persist to the database.' },
