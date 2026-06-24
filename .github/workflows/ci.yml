@@ -33,6 +33,7 @@ jobs:
       - run: npx prisma generate
       - run: npx prisma validate
       - run: npm run lint
+      - run: npm run lint:error-handling
       - run: npm run build
 
   test:
