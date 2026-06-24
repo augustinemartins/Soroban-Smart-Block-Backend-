@@ -28,6 +28,9 @@ import { startPriceUpdater, stopPriceUpdater } from './services/pricing';
 import { startBridgeWorker, stopBridgeWorker } from './bridge-tracker';
 import { writeFile, mkdir } from 'fs/promises';
 import { resolve } from 'path';
+import { apiKeyAuth } from './middleware/apiKeyAuth';
+import { auditLogMiddleware } from './middleware/auditLog';
+import { billingRouter } from './services/stripe-billing';
 
 let isShuttingDown = false;
 let wssRef: ReturnType<typeof attachWebSocketServer> | null = null;
@@ -80,7 +83,6 @@ app.get('/api/docs.json', (_req, res) => res.json(swaggerSpec));
 app.use('/api/graphql', yogaHandler as unknown as express.RequestHandler);
 
 app.use('/api/v1', router);
-app.use('/api/admin/api-keys', adminApiKeysRouter);
 app.use('/api/billing', billingRouter);
 
 app.get('/metrics', async (_req, res) => {
