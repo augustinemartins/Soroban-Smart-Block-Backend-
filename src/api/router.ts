@@ -11,11 +11,6 @@
  *   - Kebab-case, matching the file name where possible
  *   - No trailing slashes
  *   - oracle-audit mounts under /oracles/audit (avoids root wildcard conflict)
- *
- * NOTE: Only routers that compile against the current Prisma schema are
- * mounted here. Additional routers exist in src/api/ for advanced features
- * (arbitrage, MEV, privacy, etc.) but depend on Prisma models not yet in
- * the schema. Those will be mounted once the models are added.
  */
 
 import { Router } from 'express';
@@ -68,14 +63,17 @@ router.use('/wallets', walletRouter);
 router.use('/tokens', tokenRouter);
 router.use('/authorizations', authorizationRouter);
 router.use('/render', renderRouter);
-router.use('/simulate', simulateRouter);
-router.use('/verify', verifyRouter);
+// simulate and verify invoke Soroban RPC and perform heavy analysis — key required
+router.use('/simulate', requireApiKey, simulateRouter);
+router.use('/verify', requireApiKey, verifyRouter);
 router.use('/sync-state', syncStateRouter);
 router.use('/network', networkRouter);
 router.use('/token-metadata', tokenMetadataRouter);
 router.use('/protocol', protocolRouter);
-router.use('/aa', aaRouter);
-router.use('/compliance', complianceRouter);
+// aa (account abstraction) performs compute-heavy operations — key required
+router.use('/aa', requireApiKey, aaRouter);
+// compliance contains write mutations and sensitive analysis — key required
+router.use('/compliance', requireApiKey, complianceRouter);
 
 // ── Token Pricing & Valuation ─────────────────────────────────────────────────
 router.use('/token-prices', tokenPricesRouter);
@@ -84,10 +82,12 @@ router.use('/portfolio', portfolioRouter);
 router.use('/market/alerts', alertsRouter);
 
 // ── Natural Language Query Interface (#328) ───────────────────────────────────
-router.use('/query', nlqRouter);
+// nlq invokes LLM APIs — compute-heavy and billed per request; key required
+router.use('/query', requireApiKey, nlqRouter);
 
 // ── Historical Data Market (#327) ─────────────────────────────────────────────
-router.use('/data-market', dataMarketRouter);
+// data-market includes write/purchase operations — key required
+router.use('/data-market', requireApiKey, dataMarketRouter);
 
 // ── NFT Collection Discovery, Rarity Engine, Marketplace Analytics & Portfolio ──
 import { nftRouter } from './nft';
@@ -100,10 +100,11 @@ router.use('/bridge-tracker', bridgeTrackerRouter);
 // ── CSV Exports (auth required for all export operations) ─────────────────────
 router.use('/exports', requireApiKey, exportsRouter);
 
-// ── Freeze Management (adminAuth is applied per-mutation inside the router) ───
-router.use('/freeze', freezeRouter);
+// ── Freeze Management — requires API key; per-mutation adminAuth inside router ─
+router.use('/freeze', requireApiKey, freezeRouter);
 
 // ── Predictive Analytics ──────────────────────────────────────────────────────
-router.use('/predict', predictRouter);
+// predict/forecast run ML models — compute-heavy; key required
+router.use('/predict', requireApiKey, predictRouter);
 // forecast.ts exposes alternative model-management paths under /forecast/predict/…
-router.use('/forecast', forecastRouter);
+router.use('/forecast', requireApiKey, forecastRouter);
