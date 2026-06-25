@@ -27,13 +27,13 @@ export class FeatureStore {
           featureId: txVolDef.id,
           timestamp: closeTime,
           value: txVolume,
-          blockNumber: BigInt(ledgerSequence),
+          ledger: ledgerSequence,
         },
         {
           featureId: txVol7dDef.id,
           timestamp: closeTime,
           value: txVol7d,
-          blockNumber: BigInt(ledgerSequence),
+          ledger: ledgerSequence,
         },
       ],
       skipDuplicates: true,
@@ -50,7 +50,6 @@ export class FeatureStore {
           name,
           description,
           category: 'onchain',
-          granularity: 'block',
         },
       });
     }

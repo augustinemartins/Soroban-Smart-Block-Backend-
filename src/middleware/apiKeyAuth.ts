@@ -7,6 +7,7 @@
  */
 
 import crypto from 'crypto';
+import * as ipaddr from 'ipaddr.js';
 import type { Request, Response, NextFunction } from 'express';
 import { prismaRead, prismaWrite } from '../db';
 import { logger } from '../logger';
@@ -37,13 +38,23 @@ function hashKey(raw: string): string {
 }
 
 function ipMatchesCidr(ip: string, cidr: string): boolean {
-  // Simple prefix match — production should use a proper CIDR library
-  if (cidr === ip) return true;
-  if (cidr.includes('/')) {
-    const [network] = cidr.split('/');
-    return ip.startsWith(network.split('.').slice(0, 3).join('.'));
+  try {
+    // ipaddr.process normalizes IPv4-mapped IPv6 (::ffff:x.x.x.x) to plain IPv4
+    const addr = ipaddr.process(ip);
+    if (cidr.includes('/')) {
+      const range = ipaddr.parseCIDR(cidr);
+      if (addr.kind() === 'ipv4' && range[0].kind() === 'ipv4') {
+        return (addr as ipaddr.IPv4).match(range as [ipaddr.IPv4, number]);
+      }
+      if (addr.kind() === 'ipv6' && range[0].kind() === 'ipv6') {
+        return (addr as ipaddr.IPv6).match(range as [ipaddr.IPv6, number]);
+      }
+      return false;
+    }
+    return ipaddr.process(cidr).toString() === addr.toString();
+  } catch {
+    return false;
   }
-  return false;
 }
 
 function endpointAllowed(path: string, allowedEndpoints: string[]): boolean {
@@ -54,15 +65,21 @@ function endpointAllowed(path: string, allowedEndpoints: string[]): boolean {
   });
 }
 
-// Cache resolved keys for 60s to avoid DB lookup on every request
+// Cache resolved keys for 60s to avoid DB lookup on every request.
+// Keyed by SHA-256 digest so raw credentials never remain in process memory.
 const keyCache = new Map<string, { ctx: ApiKeyContext | null; expiresAt: number }>();
 const KEY_CACHE_TTL = 60_000;
 
+/** Exposed for testing only — do not call in production code. */
+export function _keyCacheKeys(): string[] {
+  return Array.from(keyCache.keys());
+}
+
 async function resolveApiKey(raw: string): Promise<ApiKeyContext | null> {
-  const cached = keyCache.get(raw);
+  const hash = hashKey(raw);
+  const cached = keyCache.get(hash);
   if (cached && cached.expiresAt > Date.now()) return cached.ctx;
 
-  const hash = hashKey(raw);
   const record = await prismaRead.devApiKey
     .findFirst({
       where: { keyHash: hash, status: 'active' },
@@ -105,7 +122,7 @@ async function resolveApiKey(raw: string): Promise<ApiKeyContext | null> {
       .catch(() => {});
   }
 
-  keyCache.set(raw, { ctx, expiresAt: Date.now() + KEY_CACHE_TTL });
+  keyCache.set(hash, { ctx, expiresAt: Date.now() + KEY_CACHE_TTL });
   return ctx;
 }
 
@@ -126,7 +143,7 @@ export async function apiKeyAuth(req: Request, res: Response, next: NextFunction
   }
 
   // IP whitelist check
-  const clientIp = (req.ip ?? '').replace('::ffff:', '');
+  const clientIp = req.ip ?? '';
   if (ctx.allowedIps && ctx.allowedIps.length > 0) {
     if (!ctx.allowedIps.some((cidr) => ipMatchesCidr(clientIp, cidr))) {
       logger.warn('[api-key] IP not in whitelist', { keyId: ctx.id, ip: clientIp });

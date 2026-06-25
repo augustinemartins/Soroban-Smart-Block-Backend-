@@ -22,6 +22,7 @@ import { coldStorageRouter, initializeColdStorage } from './middleware/coldStora
 import { networkRouter } from './middleware/networkRouter';
 import { swaggerSpec } from './indexer/swaggerSpec';
 import { attachWebSocketServer, shutdownWebSocketServer } from './ws/eventBroadcaster';
+import { attachPrivacyWebSocket as attachPrivacyWebSocketReal } from './ws/privacyBroadcaster';
 import yogaHandler from './graphql';
 import { warmTokenMetadataCache } from './indexer/token-metadata';
 import { cacheConnect, cacheClose } from './cache';
@@ -34,6 +35,8 @@ import { writeFile, mkdir } from 'fs/promises';
 import { resolve } from 'path';
 import { apiKeyAuth } from './middleware/apiKeyAuth';
 import { auditLogMiddleware } from './middleware/auditLog';
+import { asyncHandler } from './middleware/asyncHandler';
+import { rejectUntrustedForwardedHeaders } from './middleware/proxyTrust';
 import { billingRouter } from './services/stripe-billing';
 
 let isShuttingDown = false;
@@ -42,10 +45,7 @@ let wssRef: ReturnType<typeof attachWebSocketServer> | null = null;
 const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS ?? '30000');
 const STATE_DUMP_PATH = process.env.STATE_DUMP_PATH ?? './data/state';
 
-// Stub functions for features requiring missing Prisma schema models
-function attachPrivacyWebSocket(_server: unknown): void {
-  logger.debug('Privacy WebSocket disabled — schema models not yet available');
-}
+// Stub functions for features that still depend on unresolved schema models
 function attachComposabilityWebSocket(_server: unknown): void {
   logger.debug('Composability WebSocket disabled — schema models not yet available');
 }
@@ -63,9 +63,28 @@ function startFeeAggregator(): void {
 }
 
 const app = express();
+app.set('trust proxy', config.trustProxy);
+app.use(rejectUntrustedForwardedHeaders);
 
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors());
+
+// Build an origin allowlist from CORS_ALLOWED_ORIGINS (comma-separated URLs).
+// Production requires an explicit list; other envs fall back to '*'.
+const corsOrigin: cors.CorsOptions['origin'] = (() => {
+  const raw = process.env.CORS_ALLOWED_ORIGINS?.trim();
+  if (raw) return raw.split(',').map((o) => o.trim());
+  if (config.nodeEnv === 'production') return false;
+  return '*';
+})();
+
+app.use(
+  cors({
+    origin: corsOrigin,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Api-Key', 'X-Request-Id'],
+    credentials: true,
+  }),
+);
 // Correlation IDs first — requestId is needed by morgan token and logger.
 app.use(correlationMiddleware);
 morgan.token('request-id', (req) => (req as express.Request).requestId ?? '-');
@@ -86,7 +105,12 @@ app.use(auditLogMiddleware);
 
 app.use(coldStorageRouter);
 
-app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+// Interactive Swagger UI is disabled in production unless ENABLE_DOCS=true.
+// The raw schema endpoints remain available for tooling/codegen in all envs.
+const docsEnabled = config.nodeEnv !== 'production' || process.env.ENABLE_DOCS === 'true';
+if (docsEnabled) {
+  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+}
 app.get('/api/docs.json', (_req, res) => res.json(swaggerSpec));
 app.get('/api/v1/openapi.json', (_req, res) => res.json(swaggerSpec));
 
@@ -95,10 +119,13 @@ app.use('/api/graphql', yogaHandler as unknown as express.RequestHandler);
 app.use('/api/v1', router);
 app.use('/api/billing', billingRouter);
 
-app.get('/metrics', async (_req, res) => {
-  res.set('Content-Type', registry.contentType);
-  res.end(await registry.metrics());
-});
+app.get(
+  '/metrics',
+  asyncHandler(async (_req, res) => {
+    res.set('Content-Type', registry.contentType);
+    res.end(await registry.metrics());
+  }),
+);
 
 app.get('/health', (_req, res) => {
   if (isShuttingDown) {
@@ -219,7 +246,7 @@ async function main() {
 
   const httpServer: Server = createServer(app);
   wssRef = attachWebSocketServer(httpServer);
-  attachPrivacyWebSocket(httpServer);
+  attachPrivacyWebSocketReal(httpServer);
   attachComposabilityWebSocket(httpServer);
   attachArbitrageWebSocket(httpServer);
 

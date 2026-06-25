@@ -165,7 +165,13 @@ export async function registerFrozenKey(
   await prisma.frozenLedgerKey.upsert({
     where: { ledgerKey },
     update: { active: true, reason: reason ?? null },
-    create: { ledgerKey, contractAddress, frozenAtLedger, frozenAtTime, reason: reason ?? null },
+    create: {
+      ledgerKey,
+      contractAddress: contractAddress ?? '',
+      frozenAtLedger,
+      frozenAtTime,
+      reason: reason ?? null,
+    },
   });
   invalidateFreezeCache();
   console.log(
