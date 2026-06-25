@@ -9,6 +9,7 @@ import { simulateRouter } from './simulate';
 import { verifyRouter } from './verify';
 import { dexRouter } from './dex';
 import { nftRouter } from './nft';
+import { webhookRouter } from './webhooks';
 
 export const router = Router();
 
@@ -22,3 +23,4 @@ router.use('/simulate', simulateRouter);
 router.use('/verify', verifyRouter);
 router.use('/dex', dexRouter);
 router.use('/nft', nftRouter);
+router.use('/webhooks', webhookRouter);

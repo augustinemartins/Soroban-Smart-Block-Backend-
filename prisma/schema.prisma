@@ -201,3 +201,69 @@ model FailedItem {
   @@index([itemType, dead])
   @@index([ledger])
 }
+
+// ─── Issue #296: Programmable Webhook Engine ─────────────────────────────────
+
+model WebhookEndpoint {
+  id            String   @id @default(cuid())
+  name          String
+  ownerId       String
+  channel       String   @default("http")
+  channelConfig Json     @default("{}")
+  secret        String?
+  active        Boolean  @default(true)
+  filterRules   Json     @default("[]")
+  transformTemplate Json?
+  retryPolicy   Json     @default("{}")
+  rateLimit     Int      @default(100)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  deliveries WebhookDelivery[]
+  workflows  WebhookWorkflow[]
+
+  @@index([ownerId])
+  @@index([active])
+  @@index([channel])
+}
+
+model WebhookDelivery {
+  id           String    @id @default(cuid())
+  endpointId   String
+  eventType    String
+  payload      Json
+  status       String    @default("pending")
+  attempts     Int       @default(0)
+  lastError    String?
+  responseCode Int?
+  responseBody String?
+  deliveredAt  DateTime?
+  nextRetryAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([endpointId])
+  @@index([status])
+  @@index([eventType])
+  @@index([nextRetryAt])
+}
+
+model WebhookWorkflow {
+  id           String   @id @default(cuid())
+  endpointId   String
+  name         String
+  triggerEvent String
+  conditions   Json     @default("[]")
+  steps        Json     @default("[]")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([endpointId])
+  @@index([triggerEvent])
+  @@index([active])
+}
