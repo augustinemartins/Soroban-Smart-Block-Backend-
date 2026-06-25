@@ -62,6 +62,8 @@ function startFeeAggregator(): void {
 }
 
 const app = express();
+app.set('trust proxy', config.trustProxy);
+app.use(rejectUntrustedForwardedHeaders);
 
 app.use(helmet({ contentSecurityPolicy: false }));
 
