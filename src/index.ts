@@ -34,6 +34,7 @@ import { writeFile, mkdir } from 'fs/promises';
 import { resolve } from 'path';
 import { apiKeyAuth } from './middleware/apiKeyAuth';
 import { auditLogMiddleware } from './middleware/auditLog';
+import { rejectUntrustedForwardedHeaders } from './middleware/proxyTrust';
 import { billingRouter } from './services/stripe-billing';
 
 let isShuttingDown = false;
@@ -63,6 +64,8 @@ function startFeeAggregator(): void {
 }
 
 const app = express();
+app.set('trust proxy', config.trustProxy);
+app.use(rejectUntrustedForwardedHeaders);
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
@@ -95,10 +98,10 @@ app.use('/api/graphql', yogaHandler as unknown as express.RequestHandler);
 app.use('/api/v1', router);
 app.use('/api/billing', billingRouter);
 
-app.get('/metrics', async (_req, res) => {
+app.get('/metrics', asyncHandler(async (_req, res) => {
   res.set('Content-Type', registry.contentType);
   res.end(await registry.metrics());
-});
+}));
 
 app.get('/health', (_req, res) => {
   if (isShuttingDown) {
