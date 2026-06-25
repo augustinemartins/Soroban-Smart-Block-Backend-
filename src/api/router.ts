@@ -46,6 +46,17 @@ import { tokenPricesRouter } from './token-prices';
 import { portfolioRouter } from './portfolio';
 import { alertsRouter } from './alerts';
 
+// ── CSV Exports ───────────────────────────────────────────────────────────────
+import { exportsRouter } from './exports';
+import { requireApiKey } from '../middleware/apiKeyAuth';
+
+// ── Freeze Management ─────────────────────────────────────────────────────────
+import { freezeRouter } from './freeze';
+
+// ── Predictive Analytics ──────────────────────────────────────────────────────
+import { predictRouter } from './predict';
+import forecastRouter from './forecast';
+
 export const router = Router();
 
 // ── Core Stellar / Soroban ────────────────────────────────────────────────────
@@ -85,3 +96,14 @@ router.use('/nft', nftRouter);
 // ── Bridge Tracker ─────────────────────────────────────────────────────────────
 import { bridgeTrackerRouter } from './bridge-tracker';
 router.use('/bridge-tracker', bridgeTrackerRouter);
+
+// ── CSV Exports (auth required for all export operations) ─────────────────────
+router.use('/exports', requireApiKey, exportsRouter);
+
+// ── Freeze Management (adminAuth is applied per-mutation inside the router) ───
+router.use('/freeze', freezeRouter);
+
+// ── Predictive Analytics ──────────────────────────────────────────────────────
+router.use('/predict', predictRouter);
+// forecast.ts exposes alternative model-management paths under /forecast/predict/…
+router.use('/forecast', forecastRouter);
