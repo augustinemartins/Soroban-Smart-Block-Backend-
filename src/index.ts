@@ -22,6 +22,7 @@ import { coldStorageRouter, initializeColdStorage } from './middleware/coldStora
 import { networkRouter } from './middleware/networkRouter';
 import { swaggerSpec } from './indexer/swaggerSpec';
 import { attachWebSocketServer, shutdownWebSocketServer } from './ws/eventBroadcaster';
+import { attachPrivacyWebSocket as attachPrivacyWebSocketReal } from './ws/privacyBroadcaster';
 import yogaHandler from './graphql';
 import { warmTokenMetadataCache } from './indexer/token-metadata';
 import { cacheConnect, cacheClose } from './cache';
@@ -42,10 +43,7 @@ let wssRef: ReturnType<typeof attachWebSocketServer> | null = null;
 const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS ?? '30000');
 const STATE_DUMP_PATH = process.env.STATE_DUMP_PATH ?? './data/state';
 
-// Stub functions for features requiring missing Prisma schema models
-function attachPrivacyWebSocket(_server: unknown): void {
-  logger.debug('Privacy WebSocket disabled — schema models not yet available');
-}
+// Stub functions for features that still depend on unresolved schema models
 function attachComposabilityWebSocket(_server: unknown): void {
   logger.debug('Composability WebSocket disabled — schema models not yet available');
 }
@@ -95,10 +93,10 @@ app.use('/api/graphql', yogaHandler as unknown as express.RequestHandler);
 app.use('/api/v1', router);
 app.use('/api/billing', billingRouter);
 
-app.get('/metrics', async (_req, res) => {
+app.get('/metrics', asyncHandler(async (_req, res) => {
   res.set('Content-Type', registry.contentType);
   res.end(await registry.metrics());
-});
+}));
 
 app.get('/health', (_req, res) => {
   if (isShuttingDown) {
@@ -219,7 +217,7 @@ async function main() {
 
   const httpServer: Server = createServer(app);
   wssRef = attachWebSocketServer(httpServer);
-  attachPrivacyWebSocket(httpServer);
+  attachPrivacyWebSocketReal(httpServer);
   attachComposabilityWebSocket(httpServer);
   attachArbitrageWebSocket(httpServer);
 
