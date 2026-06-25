@@ -1,4 +1,4 @@
-import prisma from '../db';
+import { prismaWrite as prisma } from '../db';
 
 export class FeatureStore {
   /**
@@ -80,7 +80,7 @@ export class FeatureStore {
       return Array.from({ length: limit }, () => 1000 + Math.random() * 500);
     }
 
-    return values.reverse().map((v) => v.value);
+    return values.reverse().map((v: { value: number }) => v.value);
   }
 }
 
