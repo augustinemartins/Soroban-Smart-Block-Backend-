@@ -118,9 +118,33 @@ app.use('/api/graphql', yogaHandler as unknown as express.RequestHandler);
 app.use('/api/v1', router);
 app.use('/api/billing', billingRouter);
 
+// Metrics are gated by METRICS_TOKEN when set; without it only loopback is allowed.
+const metricsToken = process.env.METRICS_TOKEN?.trim() || null;
+
 app.get(
   '/metrics',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    if (metricsToken) {
+      const provided =
+        (req.headers['authorization'] ?? '').replace(/^Bearer\s+/i, '') ||
+        (req.headers['x-metrics-token'] as string | undefined) ||
+        '';
+      if (provided !== metricsToken) {
+        res
+          .status(401)
+          .set('WWW-Authenticate', 'Bearer realm="metrics"')
+          .json({ error: 'Unauthorized' });
+        return;
+      }
+    } else {
+      const ip = (req.ip ?? '').replace('::ffff:', '');
+      if (ip !== '127.0.0.1' && ip !== '::1') {
+        res
+          .status(403)
+          .json({ error: 'Metrics endpoint requires METRICS_TOKEN for remote access' });
+        return;
+      }
+    }
     res.set('Content-Type', registry.contentType);
     res.end(await registry.metrics());
   }),
