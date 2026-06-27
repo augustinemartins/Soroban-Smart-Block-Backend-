@@ -100,3 +100,8 @@ router.use('/admin', adminRouter);
 // ── Gas Analytics Engine (#293) ────────────────────────────────────────────────
 import { gasRouter } from './gas';
 router.use('/gas', gasRouter);
+
+// ── Multi-Language SDK Suite (#292) ────────────────────────────────────────────
+import { sdksRouter, openApiSpecRouter } from './sdks';
+router.use('/sdks', sdksRouter);
+router.use('/', openApiSpecRouter);
