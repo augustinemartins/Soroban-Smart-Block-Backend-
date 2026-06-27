@@ -6,8 +6,8 @@
  * recovery hints, and integrates with monitoring/alerting.
  *
  * Mount AFTER all routes but BEFORE the 404 catch-all:
- *   app.use(errorHandler);
- *   app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
+ * app.use(errorHandler);
+ * app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
  */
 
 import { Request, Response, NextFunction } from 'express';
@@ -204,6 +204,8 @@ export function errorHandler(err: Error, req: Request, res: Response, _next: Nex
 
   // Send response
   res.status(statusCode).json(responseBody);
+} // <--- Closes the errorHandler function properly
+
 /** Any error that carries a numeric statusCode is treated as an HTTP error. */
 function hasStatusCode(err: unknown): err is { statusCode: number; message: string } {
   return (
@@ -213,5 +215,3 @@ function hasStatusCode(err: unknown): err is { statusCode: number; message: stri
     typeof (err as Record<string, unknown>).statusCode === 'number'
   );
 }
-
-
