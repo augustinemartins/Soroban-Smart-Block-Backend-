@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import type { Chain } from '../bridge-tracker/types';
 import {
   detectBridgeTransactions,
   pollAndResolvePending,
@@ -25,16 +26,27 @@ export const bridgeTrackerRouter = Router();
 
 // ── Bridge Transactions ─────────────────────────────────────────────────────
 
+const VALID_CHAINS: [Chain, ...Chain[]] = [
+  'ethereum',
+  'solana',
+  'cosmos',
+  'bsc',
+  'polygon',
+  'avalanche',
+  'arbitrum',
+  'optimism',
+];
+
 // GET /api/v1/bridge-tracker/transactions
 bridgeTrackerRouter.get('/transactions', async (req: Request, res: Response) => {
   try {
     const schema = z.object({
       protocol: z.string().optional(),
-      sourceChain: z.string().optional(),
-      destinationChain: z.string().optional(),
+      sourceChain: z.enum(VALID_CHAINS).optional(),
+      destinationChain: z.enum(VALID_CHAINS).optional(),
       status: z.string().optional(),
-      sender: z.string().optional(),
-      recipient: z.string().optional(),
+      sender: z.string().min(1).optional(),
+      recipient: z.string().min(1).optional(),
       limit: z.coerce.number().min(1).max(100).default(20),
       offset: z.coerce.number().min(0).default(0),
     });

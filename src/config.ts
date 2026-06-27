@@ -6,12 +6,24 @@ const network = process.env.STELLAR_NETWORK ?? 'testnet';
 dotenv.config({ path: `.env.${network}` });
 dotenv.config(); // base .env fills any remaining gaps
 
+function parseTrustProxy(value: string | undefined): boolean | string | string[] {
+  if (!value) return false;
+  const trimmed = value.trim();
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  return trimmed
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 const profile: NetworkProfile = getProfile(network);
 
 export const config = {
   // ── Server ───────────────────────────────────────────────────────────────
   port: parseInt(process.env.PORT ?? '3000'),
   nodeEnv: process.env.NODE_ENV ?? 'development',
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
 
   // ── Active network profile ────────────────────────────────────────────────
   profile,
@@ -40,4 +52,6 @@ export const config = {
   // ── Rate limiting ─────────────────────────────────────────────────────────
   rateLimitWindowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS ?? '60000'),
   rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX ?? '100'),
+  openAiApiKey: process.env.OPENAI_API_KEY ?? '',
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
 };

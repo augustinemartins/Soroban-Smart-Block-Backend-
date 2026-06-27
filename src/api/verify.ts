@@ -3,7 +3,7 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import * as path from 'path';
 import * as os from 'os';
-import { prisma } from '../db';
+import { prismaWrite as prisma } from '../db';
 import {
   extractArchive,
   compileSandboxed,

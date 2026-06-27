@@ -1,9 +1,13 @@
+// OTel SDK must be initialised before any other imports.
+import './tracer';
+
 import express from 'express';
 import { createServer, Server } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import swaggerUi from 'swagger-ui-express';
+import { correlationMiddleware } from './middleware/correlation';
 import { config } from './config';
 import { router } from './api/router';
 import { prismaWrite as prisma, prismaRead } from './db';
@@ -18,9 +22,11 @@ import { coldStorageRouter, initializeColdStorage } from './middleware/coldStora
 import { networkRouter } from './middleware/networkRouter';
 import { swaggerSpec } from './indexer/swaggerSpec';
 import { attachWebSocketServer, shutdownWebSocketServer } from './ws/eventBroadcaster';
+import { attachPrivacyWebSocket as attachPrivacyWebSocketReal } from './ws/privacyBroadcaster';
 import yogaHandler from './graphql';
 import { warmTokenMetadataCache } from './indexer/token-metadata';
-import { cacheConnect, cacheClose } from './cache';
+import { cacheConnect, cacheClose, isCacheReady } from './cache';
+import { markReady, markNotReady, getReadinessState, isFullyReady } from './readiness';
 import { errorHandler } from './middleware/errorHandler';
 import { requestContext } from './middleware/requestContext';
 import { apiKeyAuth } from './middleware/apiKeyAuth';
@@ -33,6 +39,16 @@ import { startPriceUpdater, stopPriceUpdater } from './services/pricing';
 import { startBridgeWorker, stopBridgeWorker } from './bridge-tracker';
 import { writeFile, mkdir } from 'fs/promises';
 import { resolve } from 'path';
+import { apiKeyAuth } from './middleware/apiKeyAuth';
+import { auditLogMiddleware } from './middleware/auditLog';
+import { asyncHandler } from './middleware/asyncHandler';
+import { rejectUntrustedForwardedHeaders } from './middleware/proxyTrust';
+import { billingRouter } from './services/stripe-billing';
+import { startArbitrageScanner as startArbitrageScannerImpl } from './indexer/arbitrage-scanner';
+import { startPoolPriceMonitor as startPoolPriceMonitorImpl } from './indexer/pool-price-monitor';
+import { startFeeAggregator as startFeeAggregatorImpl } from './indexer/fee-aggregator';
+import { attachArbitrageWebSocket as attachArbitrageWebSocketImpl } from './ws/arbitrageBroadcaster';
+import { attachComposabilityWebSocket as attachComposabilityWebSocketImpl } from './ws/composabilityBroadcaster';
 
 let isShuttingDown = false;
 let wssRef: ReturnType<typeof attachWebSocketServer> | null = null;
@@ -40,31 +56,46 @@ let wssRef: ReturnType<typeof attachWebSocketServer> | null = null;
 const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS ?? '30000');
 const STATE_DUMP_PATH = process.env.STATE_DUMP_PATH ?? './data/state';
 
-// Stub functions for features requiring missing Prisma schema models
-function attachPrivacyWebSocket(_server: unknown): void {
-  logger.debug('Privacy WebSocket disabled — schema models not yet available');
-}
-function attachComposabilityWebSocket(_server: unknown): void {
-  logger.debug('Composability WebSocket disabled — schema models not yet available');
-}
-function attachArbitrageWebSocket(_server: unknown): void {
-  logger.debug('Arbitrage WebSocket disabled — schema models not yet available');
-}
-function startPoolPriceMonitor(): void {
-  logger.debug('Pool price monitor disabled — schema models not yet available');
-}
-function startArbitrageScanner(): void {
-  logger.debug('Arbitrage scanner disabled — schema models not yet available');
-}
-function startFeeAggregator(): void {
-  logger.debug('Fee aggregator disabled — schema models not yet available');
-}
+// Feature flags — set env var to 'true' to enable each optional service.
+const ENABLE_PRIVACY_WS = process.env.ENABLE_PRIVACY_WS === 'true';
+const ENABLE_COMPOSABILITY_WS = process.env.ENABLE_COMPOSABILITY_WS === 'true';
+const ENABLE_ARBITRAGE_WS = process.env.ENABLE_ARBITRAGE_WS === 'true';
+const ENABLE_POOL_MONITOR = process.env.ENABLE_POOL_MONITOR === 'true';
+const ENABLE_ARBITRAGE_SCANNER = process.env.ENABLE_ARBITRAGE_SCANNER === 'true';
+const ENABLE_FEE_AGGREGATOR = process.env.ENABLE_FEE_AGGREGATOR === 'true';
+
+// Tracks which optional services are disabled, for /readyz reporting.
+const disabledServices: string[] = [];
 
 const app = express();
+app.set('trust proxy', config.trustProxy);
+app.use(rejectUntrustedForwardedHeaders);
 
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors());
-app.use(morgan('dev'));
+
+// Build an origin allowlist from CORS_ALLOWED_ORIGINS (comma-separated URLs).
+// Production requires an explicit list; other envs fall back to '*'.
+const corsOrigin: cors.CorsOptions['origin'] = (() => {
+  const raw = process.env.CORS_ALLOWED_ORIGINS?.trim();
+  if (raw) return raw.split(',').map((o) => o.trim());
+  if (config.nodeEnv === 'production') return false;
+  return '*';
+})();
+
+app.use(
+  cors({
+    origin: corsOrigin,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Api-Key', 'X-Request-Id'],
+    credentials: true,
+  }),
+);
+// Correlation IDs first — requestId is needed by morgan token and logger.
+app.use(correlationMiddleware);
+morgan.token('request-id', (req) => (req as express.Request).requestId ?? '-');
+app.use(
+  morgan(':method :url :status :res[content-length] - :response-time ms request-id=:request-id'),
+);
 app.use(express.json());
 app.use(networkRouter);
 
@@ -83,19 +114,27 @@ app.use(auditLogMiddleware);
 
 app.use(coldStorageRouter);
 
-app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+// Interactive Swagger UI is disabled in production unless ENABLE_DOCS=true.
+// The raw schema endpoints remain available for tooling/codegen in all envs.
+const docsEnabled = config.nodeEnv !== 'production' || process.env.ENABLE_DOCS === 'true';
+if (docsEnabled) {
+  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+}
 app.get('/api/docs.json', (_req, res) => res.json(swaggerSpec));
+app.get('/api/v1/openapi.json', (_req, res) => res.json(swaggerSpec));
 
 app.use('/api/graphql', yogaHandler as unknown as express.RequestHandler);
 
 app.use('/api/v1', router);
-app.use('/api/admin/api-keys', adminApiKeysRouter);
 app.use('/api/billing', billingRouter);
 
-app.get('/metrics', async (_req, res) => {
-  res.set('Content-Type', registry.contentType);
-  res.end(await registry.metrics());
-});
+app.get(
+  '/metrics',
+  asyncHandler(async (_req, res) => {
+    res.set('Content-Type', registry.contentType);
+    res.end(await registry.metrics());
+  }),
+);
 
 app.get('/health', (_req, res) => {
   if (isShuttingDown) {
@@ -106,9 +145,26 @@ app.get('/health', (_req, res) => {
 
 app.get('/readyz', (_req, res) => {
   if (isShuttingDown) {
-    return res.status(503).json({ status: 'not_ready' });
+    return res.status(503).json({ status: 'not_ready', reason: 'shutting_down' });
   }
-  res.json({ status: 'ready' });
+  const dependencies = getReadinessState();
+  if (!isFullyReady()) {
+    return res.status(503).json({ status: 'not_ready', dependencies });
+  }
+  res.json({ status: 'ready', dependencies });
+});
+
+// Readiness probe — returns 503 when the indexer has suffered a fatal failure (#440)
+app.get('/ready', (_req, res) => {
+  const { healthy, failureReason } = getIndexerStatus();
+  if (!healthy) {
+    res.status(503).json({ status: 'unavailable', reason: failureReason });
+    return;
+  }
+  res.json({
+    status: 'ready',
+    ...(disabledServices.length > 0 && { disabledServices }),
+  });
 });
 
 // Global error handler — MUST be after all routes but BEFORE 404 catch-all
@@ -203,42 +259,102 @@ async function main() {
   registerShutdownHandlers();
 
   await initRateLimitStore();
+
   await cacheConnect();
+  if (isCacheReady()) markReady('cache');
+
   await prisma.$connect();
   dbConnectionStatus.set(1);
+  markReady('db');
+
   await initializeColdStorage();
+  markReady('coldStorage');
 
   if (!process.env.DISABLE_INDEXER) {
-    startIndexerService().catch((err) =>
-      logger.error('Indexer service failed', { error: String(err) }),
-    );
+    markReady('indexer');
+    startIndexerService().catch((err) => {
+      logger.error('Indexer service failed', { error: String(err) });
+      markNotReady('indexer');
+    });
     warmTokenMetadataCache().catch((err) =>
       logger.warn('Token-metadata cache warm-up failed', { error: String(err) }),
     );
+  } else {
+    markReady('indexer');
   }
 
   const httpServer: Server = createServer(app);
   wssRef = attachWebSocketServer(httpServer);
-  attachPrivacyWebSocket(httpServer);
-  attachComposabilityWebSocket(httpServer);
-  attachArbitrageWebSocket(httpServer);
+
+  if (ENABLE_PRIVACY_WS) {
+    attachPrivacyWebSocketReal(httpServer);
+    logger.info('Privacy WebSocket attached');
+  } else {
+    disabledServices.push('privacyWS');
+    logger.debug('Privacy WebSocket disabled (ENABLE_PRIVACY_WS not set)');
+  }
+
+  if (ENABLE_COMPOSABILITY_WS) {
+    try {
+      attachComposabilityWebSocketImpl(httpServer);
+      logger.info('Composability WebSocket attached');
+    } catch (err) {
+      logger.warn('Composability WebSocket attachment failed', { error: String(err) });
+    }
+  } else {
+    disabledServices.push('composabilityWS');
+    logger.debug('Composability WebSocket disabled (ENABLE_COMPOSABILITY_WS not set)');
+  }
+
+  if (ENABLE_ARBITRAGE_WS) {
+    try {
+      attachArbitrageWebSocketImpl(httpServer);
+      logger.info('Arbitrage WebSocket attached');
+    } catch (err) {
+      logger.warn('Arbitrage WebSocket attachment failed', { error: String(err) });
+    }
+  } else {
+    disabledServices.push('arbitrageWS');
+    logger.debug('Arbitrage WebSocket disabled (ENABLE_ARBITRAGE_WS not set)');
+  }
 
   if (!process.env.DISABLE_INDEXER) {
-    try {
-      startPoolPriceMonitor();
-    } catch (err) {
-      logger.warn('Pool price monitor failed to start', { error: String(err) });
+    if (ENABLE_POOL_MONITOR) {
+      try {
+        startPoolPriceMonitorImpl();
+        logger.info('Pool price monitor started');
+      } catch (err) {
+        logger.warn('Pool price monitor failed to start', { error: String(err) });
+      }
+    } else {
+      disabledServices.push('poolMonitor');
+      logger.debug('Pool price monitor disabled (ENABLE_POOL_MONITOR not set)');
     }
-    try {
-      startArbitrageScanner();
-    } catch (err) {
-      logger.warn('Arbitrage scanner failed to start', { error: String(err) });
+
+    if (ENABLE_ARBITRAGE_SCANNER) {
+      try {
+        startArbitrageScannerImpl();
+        logger.info('Arbitrage scanner started');
+      } catch (err) {
+        logger.warn('Arbitrage scanner failed to start', { error: String(err) });
+      }
+    } else {
+      disabledServices.push('arbitrageScanner');
+      logger.debug('Arbitrage scanner disabled (ENABLE_ARBITRAGE_SCANNER not set)');
     }
-    try {
-      startFeeAggregator();
-    } catch (err) {
-      logger.warn('Fee aggregator failed to start', { error: String(err) });
+
+    if (ENABLE_FEE_AGGREGATOR) {
+      try {
+        startFeeAggregatorImpl();
+        logger.info('Fee aggregator started');
+      } catch (err) {
+        logger.warn('Fee aggregator failed to start', { error: String(err) });
+      }
+    } else {
+      disabledServices.push('feeAggregator');
+      logger.debug('Fee aggregator disabled (ENABLE_FEE_AGGREGATOR not set)');
     }
+
     try {
       startBridgeWorker();
     } catch (err) {

@@ -1,4 +1,4 @@
-import prisma from '../db';
+import { prismaWrite as prisma } from '../db';
 
 export class FeatureStore {
   /**
@@ -27,13 +27,13 @@ export class FeatureStore {
           featureId: txVolDef.id,
           timestamp: closeTime,
           value: txVolume,
-          blockNumber: BigInt(ledgerSequence),
+          ledger: ledgerSequence,
         },
         {
           featureId: txVol7dDef.id,
           timestamp: closeTime,
           value: txVol7d,
-          blockNumber: BigInt(ledgerSequence),
+          ledger: ledgerSequence,
         },
       ],
       skipDuplicates: true,
@@ -50,7 +50,6 @@ export class FeatureStore {
           name,
           description,
           category: 'onchain',
-          granularity: 'block',
         },
       });
     }
@@ -80,7 +79,7 @@ export class FeatureStore {
       return Array.from({ length: limit }, () => 1000 + Math.random() * 500);
     }
 
-    return values.reverse().map((v) => v.value);
+    return values.reverse().map((v: { value: number }) => v.value);
   }
 }
 
