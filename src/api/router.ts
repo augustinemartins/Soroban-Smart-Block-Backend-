@@ -41,9 +41,10 @@ import { tokenPricesRouter } from './token-prices';
 import { portfolioRouter } from './portfolio';
 import { alertsRouter } from './alerts';
 
+// ── Admin ─────────────────────────────────────────────────────────────────────
+import { adminErrorsRouter } from './admin/errors';
 // ── CSV Exports ───────────────────────────────────────────────────────────────
-import { requireApiKey, requireKeyTier } from '../middleware/apiKeyAuth';
-import { compilerRouter } from './compiler-router';
+import { requireApiKey } from '../middleware/apiKeyAuth';
 
 // ── Freeze Management ─────────────────────────────────────────────────────────
 
@@ -92,6 +93,8 @@ router.use('/data-market', requireApiKey, dataMarketRouter);
 import { nftRouter } from './nft';
 router.use('/nft', nftRouter);
 
+// ── Admin Dashboards ──────────────────────────────────────────────────────────
+router.use('/admin/errors', adminErrorsRouter);
 // ── Bridge Tracker ─────────────────────────────────────────────────────────────
 import { bridgeTrackerRouter } from './bridge-tracker';
 router.use('/bridge-tracker', bridgeTrackerRouter);
@@ -99,3 +102,7 @@ router.use('/bridge-tracker', bridgeTrackerRouter);
 // ── Admin ──────────────────────────────────────────────────────────────────────
 import { adminRouter } from './admin';
 router.use('/admin', adminRouter);
+
+// ── Universal ABI Extraction (#289) ──────────────────────────────────────────
+import { abiExtractRouter } from './abi-extract';
+router.use('/abi-extract', abiExtractRouter);

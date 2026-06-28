@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prismaWrite as prisma, prismaRead } from '../db';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { assertSafeUrl, SsrfBlockedError } from '../webhooks/ssrf-guard';
 
 export const webhooksRouter = Router();
 
@@ -61,6 +62,15 @@ webhooksRouter.post(
   asyncHandler(async (req: Request, res: Response) => {
     const parsed = createSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+    // SSRF guard: reject URLs that resolve to private/loopback/metadata addresses
+    // before they are ever persisted or contacted.
+    try {
+      await assertSafeUrl(parsed.data.url);
+    } catch (err) {
+      const message = err instanceof SsrfBlockedError ? err.message : 'Invalid webhook URL';
+      return res.status(400).json({ error: message });
+    }
 
     const sub = await prisma.webhookSubscription.create({ data: parsed.data });
     res.status(201).json(sub);
