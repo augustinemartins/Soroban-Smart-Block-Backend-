@@ -26,12 +26,11 @@ import { attachPrivacyWebSocket as attachPrivacyWebSocketReal } from './ws/priva
 import yogaHandler from './graphql';
 import { warmTokenMetadataCache } from './indexer/token-metadata';
 import { cacheConnect, cacheClose, isCacheReady } from './cache';
-import { markReady, markNotReady, getReadinessState, isFullyReady } from './readiness';
+import { markReady, markNotReady } from './readiness';
 import { errorHandler } from './middleware/errorHandler';
 import { requestContext } from './middleware/requestContext';
 import { apiKeyAuth } from './middleware/apiKeyAuth';
 import { auditLogMiddleware } from './middleware/auditLog';
-import { adminApiKeysRouter } from './api/admin/api-keys';
 import { billingRouter } from './api/billing';
 import { logger } from './logger';
 import { feedOrchestrator } from './feed/orchestrator';
@@ -49,8 +48,11 @@ import { startPoolPriceMonitor as startPoolPriceMonitorImpl } from './indexer/po
 import { startFeeAggregator as startFeeAggregatorImpl } from './indexer/fee-aggregator';
 import { attachArbitrageWebSocket as attachArbitrageWebSocketImpl } from './ws/arbitrageBroadcaster';
 import { attachComposabilityWebSocket as attachComposabilityWebSocketImpl } from './ws/composabilityBroadcaster';
+import { getHealthStatus, getLivenessStatus, getReadinessStatus } from './health';
+import { getIndexerStatus } from './indexer-state';
 
 let isShuttingDown = false;
+const SERVICE_START_TIME = Date.now();
 let wssRef: ReturnType<typeof attachWebSocketServer> | null = null;
 
 const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS ?? '30000');
@@ -136,25 +138,49 @@ app.get(
   }),
 );
 
-app.get('/health', (_req, res) => {
+// Health endpoint with dependency status
+app.get(
+  '/health',
+  asyncHandler(async (_req, res) => {
+    if (isShuttingDown) {
+      return res.status(503).json({ status: 'shutting_down', timestamp: new Date().toISOString() });
+    }
+
+    const healthStatus = await getHealthStatus();
+
+    // Return 503 if any dependency is unhealthy, 200 otherwise
+    const statusCode = healthStatus.status === 'unhealthy' ? 503 : 200;
+
+    res.status(statusCode).json({
+      ...healthStatus,
+      network: config.stellarNetwork,
+    });
+  }),
+);
+
+// Liveness probe - basic check that service is alive
+app.get('/livez', (_req, res) => {
   if (isShuttingDown) {
-    return res.status(503).json({ status: 'shutting_down' });
+    return res.status(503).json({ status: 'dead', reason: 'shutting_down' });
   }
-  res.json({ status: 'ok', network: config.stellarNetwork });
+
+  const liveness = getLivenessStatus(SERVICE_START_TIME);
+  res.json(liveness);
 });
 
+// Readiness probe - detailed check if service can handle traffic
 app.get('/readyz', (_req, res) => {
   if (isShuttingDown) {
     return res.status(503).json({ status: 'not_ready', reason: 'shutting_down' });
   }
-  const dependencies = getReadinessState();
-  if (!isFullyReady()) {
-    return res.status(503).json({ status: 'not_ready', dependencies });
-  }
-  res.json({ status: 'ready', dependencies });
+
+  const readinessStatus = getReadinessStatus();
+  const statusCode = readinessStatus.status === 'ready' ? 200 : 503;
+
+  res.status(statusCode).json(readinessStatus);
 });
 
-// Readiness probe — returns 503 when the indexer has suffered a fatal failure (#440)
+// Legacy readiness probe — returns 503 when the indexer has suffered a fatal failure (#440)
 app.get('/ready', (_req, res) => {
   const { healthy, failureReason } = getIndexerStatus();
   if (!healthy) {
