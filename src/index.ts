@@ -51,7 +51,9 @@ let isShuttingDown = false;
 let wssRef: ReturnType<typeof attachWebSocketServer> | null = null;
 
 const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS ?? '30000');
-const STATE_DUMP_PATH = process.env.STATE_DUMP_PATH ?? './data/state';
+// Default to /tmp/state so the path is writable in read-only container filesystems.
+// /tmp is already mounted as a tmpfs in the Compose security profile.
+const STATE_DUMP_PATH = process.env.STATE_DUMP_PATH ?? '/tmp/state';
 
 // Feature flags — set env var to 'true' to enable each optional service.
 const ENABLE_PRIVACY_WS = process.env.ENABLE_PRIVACY_WS === 'true';
@@ -297,8 +299,24 @@ function registerShutdownHandlers(): void {
   });
 }
 
+async function validateStateDumpPath(): Promise<void> {
+  try {
+    await mkdir(STATE_DUMP_PATH, { recursive: true });
+    const testFile = resolve(STATE_DUMP_PATH, '.write-test');
+    await writeFile(testFile, '');
+    const { unlink } = await import('fs/promises');
+    await unlink(testFile).catch(() => {});
+  } catch (err) {
+    logger.warn('State dump path is not writable; shutdown state will not be persisted', {
+      path: STATE_DUMP_PATH,
+      error: String(err),
+    });
+  }
+}
+
 async function main() {
   registerShutdownHandlers();
+  await validateStateDumpPath();
 
   await initRateLimitStore();
 

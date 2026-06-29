@@ -176,6 +176,19 @@ model IndexerState {
   updatedAt  DateTime @updatedAt
 }
 
+model RateLimitOverride {
+  id         String   @id @default(cuid())
+  identifier String
+  endpoint   String   @default("/")
+  max        Int      @default(100)
+  windowMs   Int      @default(60000)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([identifier, endpoint])
+}
+
+// Bidirectional mapping: classic Stellar asset ↔ SAC contract address
 model ReorgEvent {
   id                String   @id @default(cuid())
   ledgerSequence    Int
@@ -2880,8 +2893,9 @@ model WebhookDelivery {
 
 model WebhookSubscription {
   id              String    @id @default(cuid())
+  apiKeyId        String
   url             String
-  secret          String?
+  secret          String
   contractAddress String?
   eventType       String?
   topicSymbol     String?
@@ -2892,6 +2906,8 @@ model WebhookSubscription {
   updatedAt       DateTime @updatedAt
 
   delivery WebhookDelivery[]
+
+  @@index([apiKeyId])
 }
 
 model YieldDistribution {
