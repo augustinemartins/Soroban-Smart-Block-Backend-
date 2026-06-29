@@ -79,6 +79,21 @@ describe('config — defaults', () => {
     const cfg = await loadConfig();
     expect(cfg.rateLimitMax).toBe(100);
   });
+
+  it('defaults indexerCatchupWorkers to 4', async () => {
+    const cfg = await loadConfig();
+    expect(cfg.indexerCatchupWorkers).toBe(4);
+  });
+
+  it('defaults microBlockPollIntervalMs to 2500', async () => {
+    const cfg = await loadConfig();
+    expect(cfg.microBlockPollIntervalMs).toBe(2500);
+  });
+
+  it('defaults rateLimitWindowMs to 60000', async () => {
+    const cfg = await loadConfig();
+    expect(cfg.rateLimitWindowMs).toBe(60000);
+  });
 });
 
 describe('config — env var overrides', () => {
@@ -110,19 +125,106 @@ describe('config — env var overrides', () => {
     const cfg = await loadConfig();
     expect(cfg.indexerBatchSize).toBe(50);
   });
+
+  it('accepts PORT=1 (minimum valid port)', async () => {
+    vi.stubEnv('STELLAR_NETWORK', 'testnet');
+    vi.stubEnv('DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('TESTNET_DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('PORT', '1');
+    const cfg = await loadConfig();
+    expect(cfg.port).toBe(1);
+  });
+
+  it('accepts PORT=65535 (maximum valid port)', async () => {
+    vi.stubEnv('STELLAR_NETWORK', 'testnet');
+    vi.stubEnv('DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('TESTNET_DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('PORT', '65535');
+    const cfg = await loadConfig();
+    expect(cfg.port).toBe(65535);
+  });
+
+  it('accepts INDEXER_BATCH_SIZE=1 (minimum)', async () => {
+    vi.stubEnv('STELLAR_NETWORK', 'testnet');
+    vi.stubEnv('DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('TESTNET_DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('INDEXER_BATCH_SIZE', '1');
+    const cfg = await loadConfig();
+    expect(cfg.indexerBatchSize).toBe(1);
+  });
+
+  it('accepts INDEXER_BATCH_SIZE=1000 (maximum)', async () => {
+    vi.stubEnv('STELLAR_NETWORK', 'testnet');
+    vi.stubEnv('DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('TESTNET_DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('INDEXER_BATCH_SIZE', '1000');
+    const cfg = await loadConfig();
+    expect(cfg.indexerBatchSize).toBe(1000);
+  });
 });
 
-describe('config — NaN / invalid numeric inputs fall back to defaults', () => {
+describe('config — NaN / invalid numeric inputs cause startup failure', () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  it('PORT=abc falls back to NaN (parseInt behaviour)', async () => {
+  it('PORT=abc throws validation error on startup', async () => {
     vi.stubEnv('STELLAR_NETWORK', 'testnet');
     vi.stubEnv('DATABASE_URL', 'postgresql://localhost/test');
     vi.stubEnv('TESTNET_DATABASE_URL', 'postgresql://localhost/test');
     vi.stubEnv('PORT', 'abc');
-    const cfg = await loadConfig();
-    // parseInt('abc') === NaN; the schema will surface it
-    expect(Number.isNaN(cfg.port) || typeof cfg.port === 'number').toBe(true);
+
+    // The config module should throw during import
+    await expect(async () => {
+      vi.resetModules();
+      await import('../src/config');
+    }).rejects.toThrow(/Invalid value for PORT/);
+  });
+
+  it('INDEXER_BATCH_SIZE=-50 throws validation error', async () => {
+    vi.stubEnv('STELLAR_NETWORK', 'testnet');
+    vi.stubEnv('DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('TESTNET_DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('INDEXER_BATCH_SIZE', '-50');
+
+    await expect(async () => {
+      vi.resetModules();
+      await import('../src/config');
+    }).rejects.toThrow(/Invalid value for INDEXER_BATCH_SIZE/);
+  });
+
+  it('RATE_LIMIT_MAX=0 throws validation error', async () => {
+    vi.stubEnv('STELLAR_NETWORK', 'testnet');
+    vi.stubEnv('DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('TESTNET_DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('RATE_LIMIT_MAX', '0');
+
+    await expect(async () => {
+      vi.resetModules();
+      await import('../src/config');
+    }).rejects.toThrow(/Invalid value for RATE_LIMIT_MAX/);
+  });
+
+  it('INDEXER_POLL_INTERVAL_MS=50 throws validation error (too small)', async () => {
+    vi.stubEnv('STELLAR_NETWORK', 'testnet');
+    vi.stubEnv('DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('TESTNET_DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('INDEXER_POLL_INTERVAL_MS', '50');
+
+    await expect(async () => {
+      vi.resetModules();
+      await import('../src/config');
+    }).rejects.toThrow(/Invalid value for INDEXER_POLL_INTERVAL_MS/);
+  });
+
+  it('PORT=70000 throws validation error (too large)', async () => {
+    vi.stubEnv('STELLAR_NETWORK', 'testnet');
+    vi.stubEnv('DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('TESTNET_DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('PORT', '70000');
+
+    await expect(async () => {
+      vi.resetModules();
+      await import('../src/config');
+    }).rejects.toThrow(/Invalid value for PORT/);
   });
 });
 
