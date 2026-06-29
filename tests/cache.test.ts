@@ -217,6 +217,62 @@ describe('cache — lifecycle (memory mode)', () => {
   });
 });
 
+// ── Consistency-sensitive key blocking ───────────────────────────────────────
+
+describe('cache — consistency-sensitive key fallback disabled', () => {
+  it('returns value for non-sensitive keys from memory when Redis is absent', async () => {
+    const { cacheSet, cacheGet } = await freshCache();
+    await cacheSet('abi:contract123', { fn: 'transfer' });
+    expect(await cacheGet('abi:contract123')).toEqual({ fn: 'transfer' });
+  });
+
+  it('returns value for sensitive keys when Redis is not configured (memory-only mode)', async () => {
+    // CACHE_URL=memory:// — no Redis configured, so sensitive keys are fine in memory
+    const { cacheSet, cacheGet } = await freshCache();
+    await cacheSet('auth:user:abc', { role: 'admin' });
+    expect(await cacheGet('auth:user:abc')).toEqual({ role: 'admin' });
+  });
+});
+
+// ── Key/value redaction in log output ────────────────────────────────────────
+
+describe('cache — log redaction', () => {
+  it('redactKey masks value after first colon', async () => {
+    // Verify indirectly: error logs should not contain raw key values.
+    // We simulate a Redis write failure and capture logger output.
+    vi.resetModules();
+    const mockLogger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    vi.mock('../src/logger', () => ({ logger: mockLogger }));
+    vi.mock('redis', () => ({
+      createClient: () => ({
+        on: vi.fn(),
+        connect: vi.fn().mockResolvedValue(undefined),
+        get: vi.fn().mockRejectedValue(new Error('read error')),
+        set: vi.fn().mockRejectedValue(new Error('write error')),
+        del: vi.fn(),
+        quit: vi.fn(),
+        disconnect: vi.fn(),
+      }),
+    }));
+    vi.stubEnv('CACHE_URL', 'redis://localhost:6379');
+
+    const mod = await import('../src/cache');
+    mod.cacheClear();
+    await mod.cacheSet('auth:secret-token-xyz', 'super-secret');
+    await mod.cacheGet('auth:secret-token-xyz');
+
+    const allCalls = mockLogger.warn.mock.calls.flatMap((c) => JSON.stringify(c));
+    // Raw token value must never appear in logs
+    expect(allCalls.some((s) => s.includes('secret-token-xyz'))).toBe(false);
+    // Redacted form should appear (namespace prefix only)
+    expect(allCalls.some((s) => s.includes('auth:[redacted]'))).toBe(true);
+
+    vi.unmock('../src/logger');
+    vi.unmock('redis');
+    vi.stubEnv('CACHE_URL', 'memory://');
+  });
+});
+
 // ── Phase 4: Performance (sanity check, not strict benchmarks) ────────────────
 
 describe('cache — throughput sanity', () => {
