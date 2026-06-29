@@ -47,7 +47,11 @@ import { oracleIntelligenceRouter } from './oracle-intelligence';
 // ── Admin ─────────────────────────────────────────────────────────────────────
 import { adminErrorsRouter } from './admin/errors';
 // ── CSV Exports ───────────────────────────────────────────────────────────────
-import { requireApiKey } from '../middleware/apiKeyAuth';
+import { requireApiKey, requireKeyTier } from '../middleware/apiKeyAuth';
+import { compilerRouter } from './compiler-router';
+
+// ── MEV / Sandwich Detection (#290) ──────────────────────────────────────────
+import { sandwichRouter } from './sandwich';
 
 // ── Freeze Management ─────────────────────────────────────────────────────────
 
