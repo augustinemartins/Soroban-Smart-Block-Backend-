@@ -4,6 +4,7 @@ import { config } from '../config';
 import { fetchEvents, getLatestLedger, getRpcWebsocketUrl, getTransaction, getTransactionFromHorizon, type LedgerEvent } from './rpc';
 import { decodeTransaction, decodeEvent } from './decoder';
 import { feedOrchestrator } from '../feed/orchestrator';
+import { enqueueInitialAudit } from './audit-pipeline';
 
 const BATCH = config.indexerBatchSize;
 const WORKERS = config.indexerCatchupWorkers;
@@ -39,6 +40,9 @@ async function processLedgerRange(start: number, end: number) {
       update: {},
       create: { address: event.contractId },
     });
+
+    // Queue an initial audit for newly discovered contracts (fires after 5 min)
+    enqueueInitialAudit(event.contractId);
 
     const existingTx = await prisma.transaction.findUnique({ where: { hash: event.transactionHash } });
     if (!existingTx) {

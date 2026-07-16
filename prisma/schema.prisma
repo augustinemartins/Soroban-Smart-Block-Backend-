@@ -44,6 +44,7 @@ model Contract {
   transactions Transaction[]
   events       Event[]
   wasmUpgrades WasmUpgradeHistory[]
+  auditCerts   AuditCertificate[]
 
   @@index([address])
 }
@@ -2718,3 +2719,153 @@ model ArbitrageAlert {
   @@map("arbitrage_alerts")
 }
 // ─── End Arbitrage Intelligence Platform ──────────────────────────────────────
+
+
+// ─── Smart Contract Audit Trail & Certificate Platform ────────────────────────
+
+// Cryptographically signed audit certificate — one per audit run, versioned per contract
+model AuditCertificate {
+  id               String   @id @default(cuid())
+  contractAddress  String
+  version          Int      @default(1)
+  status           String   // "draft" | "published" | "superseded" | "revoked"
+  generatedAt      DateTime
+  expiresAt        DateTime?
+
+  // Composite scores (0–100, higher = healthier)
+  overallScore     Int
+  securityScore    Int
+  governanceScore  Int
+  economicScore    Int
+  complianceScore  Int
+  liquidityScore   Int
+
+  // Cryptographic attestation
+  signatureAlgorithm String  // "ed25519" | "ecdsa-p256"
+  signature          String  // base64-encoded signature
+  publicKey          String  // server's public key for verification
+  certificateHash    String  // SHA-256 hash of canonical certificate payload
+  anchorTxHash       String? // on-chain anchor transaction (if anchored)
+
+  // Finding summary counters
+  totalFindings    Int  @default(0)
+  openFindings     Int  @default(0)
+  criticalFindings Int  @default(0)
+  highFindings     Int  @default(0)
+  mediumFindings   Int  @default(0)
+  lowFindings      Int  @default(0)
+  resolvedFindings Int  @default(0)
+
+  findings Json  // full AuditFinding snapshot at time of cert issuance
+  scores   Json  // all sub-scores and dimension breakdowns
+  metadata Json? // additional metadata (triggeredBy, engine version, etc.)
+
+  createdAt DateTime @default(now())
+
+  auditFindings AuditFinding[]
+  auditEvents   AuditEvent[]
+  contract      Contract? @relation(fields: [contractAddress], references: [address])
+
+  @@unique([contractAddress, version])
+  @@index([contractAddress, status])
+  @@index([overallScore(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+}
+
+// Individual finding attached to a certificate — queryable, filterable, trackable
+model AuditFinding {
+  id            String   @id @default(cuid())
+  certificateId String
+  category      String   // "vulnerability" | "code_quality" | "governance" | "economics" | "compliance" | "liquidity"
+  severity      String   // "critical" | "high" | "medium" | "low" | "info"
+  title         String
+  description   String
+  detail        String?
+  recommendation String?
+  status        String   // "open" | "resolved" | "wont_fix" | "false_positive"
+  resolvedAt    DateTime?
+  resolutionNote String?
+  cweId         String?  // CWE identifier for vulnerability type
+  cvssVector    String?  // CVSS vector string
+  cvssScore     Float?
+  txHash        String?  // evidence transaction
+  createdAt     DateTime @default(now())
+
+  certificate AuditCertificate @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+
+  @@index([certificateId])
+  @@index([severity, status])
+  @@index([category])
+}
+
+// Append-only audit event log — immutable trail of everything that happened to a contract's audit
+model AuditEvent {
+  id              String   @id @default(cuid())
+  contractAddress String
+  certificateId   String?  // linked certificate if applicable
+  eventType       String   // "initial_audit" | "re_audit" | "upgrade" | "vulnerability_discovered" |
+                           // "score_change" | "certificate_published" | "certificate_revoked" |
+                           // "external_audit_submitted"
+  previousScore   Int?
+  newScore        Int?
+  triggerSource   String   // "scheduled" | "automatic" | "manual" | "external"
+  details         Json?
+  timestamp       DateTime
+  createdAt       DateTime @default(now())
+
+  certificate AuditCertificate? @relation(fields: [certificateId], references: [id])
+
+  @@index([contractAddress, timestamp(sort: Desc)])
+  @@index([eventType])
+  @@index([certificateId])
+}
+
+// External (third-party) audit submission for a contract
+model ExternalAudit {
+  id                     String   @id @default(cuid())
+  contractAddress        String
+  auditorName            String
+  auditorVerificationKey String?
+  reportType             String   // "security_audit" | "formal_verification" | "economic_audit"
+  reportUrl              String?
+  reportHash             String?  // SHA-256 of report for tamper-detection
+  findings               Json?
+  overallGrade           String?  // "pass" | "conditional_pass" | "fail"
+  submittedAt            DateTime
+  verifiedAt             DateTime?
+  verificationStatus     String   // "pending" | "verified" | "rejected"
+  createdAt              DateTime @default(now())
+
+  @@index([contractAddress])
+  @@index([verificationStatus])
+  @@index([submittedAt(sort: Desc)])
+}
+
+// Alert subscription — notify users when audit state changes for a contract
+model AuditSubscription {
+  id              String   @id @default(cuid())
+  userId          String?
+  contractAddress String
+  alertTypes      String[] // "score_drop" | "new_finding" | "upgrade" | "certificate_update"
+  threshold       Int?     // minimum score-drop magnitude to trigger (e.g. 10 points)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+  @@index([contractAddress])
+  @@index([isActive])
+}
+
+// Public certificate verification log — every verification attempt recorded
+model AuditVerificationRecord {
+  id              String   @id @default(cuid())
+  certificateHash String
+  verifierIp      String?
+  verifierKey     String?
+  result          String   // "valid" | "invalid" | "expired" | "revoked"
+  checkedAt       DateTime @default(now())
+
+  @@index([certificateHash])
+  @@index([checkedAt(sort: Desc)])
+}
+// ─── End Smart Contract Audit Trail & Certificate Platform ────────────────────

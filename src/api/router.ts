@@ -43,6 +43,7 @@ import backfillRouter from './backfill';
 import marketRouter from './market';
 import feedSSERouter from './feedSSE';
 import { arbitrageRouter } from './arbitrage';
+import { auditRouter } from './audit';
 
 export const router = Router();
 
@@ -91,3 +92,5 @@ router.use('/feed/sse', feedSSERouter);
 router.use('/market', marketRouter);
 // Arbitrage Intelligence Platform
 router.use('/arbitrage', arbitrageRouter);
+// Smart Contract Audit Trail & Certificate Platform
+router.use('/audit', auditRouter);

@@ -37,6 +37,8 @@ import { startPoolPriceMonitor } from './indexer/pool-price-monitor';
 import { errorHandler } from './middleware/errorHandler';
 import { logger } from './logger';
 import { feedOrchestrator } from './feed/orchestrator';
+import { startAuditPipeline } from './indexer/audit-pipeline';
+import { startAuditScheduler } from './indexer/audit-scheduler';
 
 const app = express();
 
@@ -125,6 +127,20 @@ async function main() {
       startArbitrageScanner();
     } catch (err) {
       logger.warn('Arbitrage scanner failed to start', { error: String(err) });
+    }
+
+    // Audit Pipeline — initial-audit queue drain (fires within 5 min of first detection)
+    try {
+      startAuditPipeline();
+    } catch (err) {
+      logger.warn('Audit pipeline failed to start', { error: String(err) });
+    }
+
+    // Audit Scheduler — daily (TVL > $100K, incremental) + weekly (all, full recompute)
+    try {
+      startAuditScheduler();
+    } catch (err) {
+      logger.warn('Audit scheduler failed to start', { error: String(err) });
     }
   }
 
