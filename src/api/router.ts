@@ -120,3 +120,9 @@ router.use('/abi-extract', abiExtractRouter);
 // Auth and owner-scoping are enforced inside webhooksRouter itself.
 import { webhooksRouter } from './webhooks';
 router.use('/webhooks', webhooksRouter);
+
+// ── Fiat On/Off-Ramp Gateway ──────────────────────────────────────────────────
+// User-facing routes require JWT auth (enforced inside rampRouter).
+// Provider webhook callbacks are HMAC-verified inside the handler.
+import { rampRouter } from './ramp';
+router.use('/ramp', rampRouter);
