@@ -2,6 +2,30 @@ import { Router, Request, Response } from 'express';
 import { prismaRead, prismaWrite } from '../db';
 import { asyncHandler } from '../middleware/asyncHandler';
 
+interface SearchIndexEntry {
+  contractAddress: string;
+  contentType: string;
+  content: string;
+  metadata: unknown;
+}
+
+interface ContractSource {
+  contractAddress: string;
+  functionDetails: Array<{
+    name: string;
+    pseudoCode?: string;
+    params?: string[];
+    returns?: string[];
+    selector: string;
+    complexity?: string;
+  }>;
+  imports: unknown[];
+  exports: unknown[];
+  events: unknown[];
+  errors: unknown[];
+  storageVariables: unknown[];
+}
+
 export const searchRouter = Router();
 
 // GET /search?q=<query> — full-text search across all contracts
@@ -40,7 +64,11 @@ searchRouter.get(
         .replace(/error:\w+/i, '')
         .trim();
 
-      const searchIndexEntries = await (prismaRead as any).searchIndexEntry.findMany({
+      const searchIndexEntries = await (
+        prismaRead as unknown as {
+          searchIndexEntry: { findMany: (args: unknown) => Promise<SearchIndexEntry[]> };
+        }
+      ).searchIndexEntry.findMany({
         where: {
           AND: [
             cleanQuery ? { content: { contains: cleanQuery, mode: 'insensitive' } } : undefined,
@@ -92,7 +120,10 @@ searchRouter.get(
       });
 
       // Group by contract and facet
-      const results: Record<string, any> = {};
+      const results: Record<
+        string,
+        { address: string; hits: Record<string, Array<{ content: string; metadata: unknown }>> }
+      > = {};
       for (const entry of searchIndexEntries) {
         if (!results[entry.contractAddress]) {
           results[entry.contractAddress] = { address: entry.contractAddress, hits: {} };
@@ -121,18 +152,30 @@ searchRouter.get(
 searchRouter.get('/index', async (req: Request, res: Response) => {
   try {
     // Fetch all contract sources and rebuild search index
-    const sources = await (prismaRead as any).contractSource.findMany({
+    const sources = await (
+      prismaRead as unknown as {
+        contractSource: { findMany: (args: unknown) => Promise<ContractSource[]> };
+      }
+    ).contractSource.findMany({
       include: { functionDetails: true },
     });
 
     // Clear existing index
-    await (prismaWrite as any).searchIndexEntry.deleteMany({});
+    await (
+      prismaWrite as unknown as {
+        searchIndexEntry: { deleteMany: (args: unknown) => Promise<{ count: number }> };
+      }
+    ).searchIndexEntry.deleteMany({});
 
     let indexed = 0;
     for (const source of sources) {
       // Index functions
       for (const fn of source.functionDetails || []) {
-        await (prismaWrite as any).searchIndexEntry.create({
+        await (
+          prismaWrite as unknown as {
+            searchIndexEntry: { create: (args: unknown) => Promise<unknown> };
+          }
+        ).searchIndexEntry.create({
           data: {
             contractAddress: source.contractAddress,
             contentType: 'function',
@@ -144,9 +187,13 @@ searchRouter.get('/index', async (req: Request, res: Response) => {
       }
 
       // Index imports
-      const imports = (source.imports as any[]) || [];
+      const imports = (source.imports as Array<Record<string, unknown>>) || [];
       for (const imp of imports) {
-        await (prismaWrite as any).searchIndexEntry.create({
+        await (
+          prismaWrite as unknown as {
+            searchIndexEntry: { create: (args: unknown) => Promise<unknown> };
+          }
+        ).searchIndexEntry.create({
           data: {
             contractAddress: source.contractAddress,
             contentType: 'import',
@@ -158,9 +205,13 @@ searchRouter.get('/index', async (req: Request, res: Response) => {
       }
 
       // Index exports
-      const exports = (source.exports as any[]) || [];
+      const exports = (source.exports as Array<Record<string, unknown>>) || [];
       for (const exp of exports) {
-        await (prismaWrite as any).searchIndexEntry.create({
+        await (
+          prismaWrite as unknown as {
+            searchIndexEntry: { create: (args: unknown) => Promise<unknown> };
+          }
+        ).searchIndexEntry.create({
           data: {
             contractAddress: source.contractAddress,
             contentType: 'export',
@@ -172,10 +223,14 @@ searchRouter.get('/index', async (req: Request, res: Response) => {
       }
 
       // Index events
-      const events = (source.events as any[]) || [];
+      const events = (source.events as unknown[]) || [];
       if (Array.isArray(events)) {
         for (const evt of events) {
-          await (prismaWrite as any).searchIndexEntry.create({
+          await (
+            prismaWrite as unknown as {
+              searchIndexEntry: { create: (args: unknown) => Promise<unknown> };
+            }
+          ).searchIndexEntry.create({
             data: {
               contractAddress: source.contractAddress,
               contentType: 'event',
@@ -188,10 +243,14 @@ searchRouter.get('/index', async (req: Request, res: Response) => {
       }
 
       // Index errors
-      const errors = (source.errors as any[]) || [];
+      const errors = (source.errors as unknown[]) || [];
       if (Array.isArray(errors)) {
         for (const err of errors) {
-          await (prismaWrite as any).searchIndexEntry.create({
+          await (
+            prismaWrite as unknown as {
+              searchIndexEntry: { create: (args: unknown) => Promise<unknown> };
+            }
+          ).searchIndexEntry.create({
             data: {
               contractAddress: source.contractAddress,
               contentType: 'error',
@@ -204,10 +263,14 @@ searchRouter.get('/index', async (req: Request, res: Response) => {
       }
 
       // Index storage variables
-      const storage = (source.storageVariables as any[]) || [];
+      const storage = (source.storageVariables as unknown[]) || [];
       if (Array.isArray(storage)) {
         for (const stor of storage) {
-          await (prismaWrite as any).searchIndexEntry.create({
+          await (
+            prismaWrite as unknown as {
+              searchIndexEntry: { create: (args: unknown) => Promise<unknown> };
+            }
+          ).searchIndexEntry.create({
             data: {
               contractAddress: source.contractAddress,
               contentType: 'storage',

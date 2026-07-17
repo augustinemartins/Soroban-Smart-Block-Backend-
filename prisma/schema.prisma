@@ -3892,3 +3892,65 @@ model AgentVerification {
   @@index([status])
   @@map("agent_verifications")
 }
+
+// =========================================================================
+// Search & Indexing Engine
+// =========================================================================
+
+model SearchDocument {
+  id        String   @id @default(cuid())
+  docType   String
+  docId     String
+  content   String
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([docType, docId])
+  @@index([docType])
+  @@map("search_documents")
+}
+
+model SearchNGram {
+  id       String @id @default(cuid())
+  docType  String
+  docId    String
+  gram     String
+  position Int
+
+  @@index([gram])
+  @@index([docType, docId])
+  @@map("search_n_grams")
+}
+
+model SearchSuggestion {
+  id        String   @id @default(cuid())
+  prefix    String
+  suffix    String?
+  docType   String
+  docId     String
+  label     String
+  weight    Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([docType, prefix, docId])
+  @@index([prefix])
+  @@index([suffix])
+  @@index([docType, prefix])
+  @@map("search_suggestions")
+}
+
+model SearchIndexState {
+  id         String   @id @default("singleton")
+  status     String   @default("idle")
+  progress   Float    @default(0)
+  totalDocs  Int      @default(0)
+  indexedDocs Int     @default(0)
+  startedAt  DateTime?
+  completedAt DateTime?
+  error      String?
+  updatedAt  DateTime @updatedAt
+
+  @@map("search_index_state")
+}

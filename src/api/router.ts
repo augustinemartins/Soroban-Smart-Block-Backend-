@@ -89,3 +89,8 @@ router.use('/bridge-tracker', bridgeTrackerRouter);
 // ── Autonomous Agents System ──────────────────────────────────────────────────
 import { agentRouter } from './agents';
 router.use('/agents', agentRouter);
+
+// ── Search Engine ─────────────────────────────────────────────────────────────
+import { searchRouter } from './search-routes';
+router.use('/search', searchRouter);
+router.use('/suggest', searchRouter);
