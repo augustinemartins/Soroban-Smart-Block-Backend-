@@ -73,6 +73,54 @@ model Event {
   @@index([ledger])
 }
 
+model VulnerabilityAdvisory {
+  id            String   @id @default(cuid())
+  advisoryId    String   @unique
+  title         String
+  description   String?
+  severity      String   // low | medium | high | critical
+  affectedPackage String?
+  affectedContracts String[] // list of affected contract addresses
+  publishedAt   DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  propagationAnalyses PropagationAnalysis[]
+
+  @@index([severity])
+}
+
+model PropagationAnalysis {
+  id              String   @id @default(cuid())
+  advisoryId      String
+  vulnerableContract String
+  directAffected  String[] // list of directly affected contract addresses
+  affectedByDepth Json     // JSON map of depth -> string[] (e.g. { "1": ["addr1"], "2": ["addr2"] })
+  totalValueAtRisk Decimal? @default(0)
+  analysisDepth   Int      @default(5)
+  analyzedAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  advisory VulnerabilityAdvisory @relation(fields: [advisoryId], references: [id])
+
+  @@index([advisoryId])
+  @@index([vulnerableContract])
+}
+
+model DexPool {
+  id             String   @id @default(cuid())
+  address        String   @unique
+  name           String?
+  tvlUsd         Decimal  @default(0)
+  tokenA         String?
+  tokenB         String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([address])
+}
+
 model IndexerState {
   id            String   @id @default("singleton")
   lastLedger    Int      @default(0)
