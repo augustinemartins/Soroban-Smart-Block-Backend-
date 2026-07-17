@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
-import { prismaRead, prismaWrite } from '../db';
+import { z } from 'zod';
+import { prismaRead as prisma, prismaWrite } from '../db';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { safeString } from '../schemas/common';
 
 interface SearchIndexEntry {
   contractAddress: string;
@@ -28,6 +30,14 @@ interface ContractSource {
 
 export const searchRouter = Router();
 
+const searchQuerySchema = z.object({
+  q: safeString
+    .refine((s) => s.trim().length >= 2, 'Query string q required (min 2 chars)')
+    .refine((s) => s.trim().length <= 512, 'Query must not exceed 512 characters'),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
 // GET /search?q=<query> — full-text search across all contracts
 // Supports faceted search with prefix notation:
 //   - function:<name>
@@ -38,25 +48,24 @@ export const searchRouter = Router();
 searchRouter.get(
   '/',
   asyncHandler(async (req: Request, res: Response) => {
-    const { q, limit = 50, offset = 0 } = req.query;
-
-    if (!q || typeof q !== 'string' || q.length < 2) {
-      return res.status(400).json({ error: 'Query string q required (min 2 chars)' });
+    const parsed = searchQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ error: 'Invalid query parameters', details: parsed.error.flatten().fieldErrors });
     }
 
-    const parsedLimit = Math.min(Number(limit) || 50, 200);
-    const parsedOffset = Math.max(Number(offset) || 0, 0);
+    const { q, limit, offset } = parsed.data;
+    const trimmedQ = q.trim();
 
     try {
-      // Parse query facets
-      const functionMatch = q.match(/function:(\w+)/i)?.[1];
-      const importMatch = q.match(/import:(\w+)/i)?.[1];
-      const eventMatch = q.match(/event:(\w+)/i)?.[1];
-      const storageMatch = q.match(/storage:(\w+)/i)?.[1];
-      const errorMatch = q.match(/error:(\w+)/i)?.[1];
+      const functionMatch = trimmedQ.match(/function:(\w+)/i)?.[1];
+      const importMatch = trimmedQ.match(/import:(\w+)/i)?.[1];
+      const eventMatch = trimmedQ.match(/event:(\w+)/i)?.[1];
+      const storageMatch = trimmedQ.match(/storage:(\w+)/i)?.[1];
+      const errorMatch = trimmedQ.match(/error:(\w+)/i)?.[1];
 
-      // Clean query for general search
-      const cleanQuery = q
+      const cleanQuery = trimmedQ
         .replace(/function:\w+/i, '')
         .replace(/import:\w+/i, '')
         .replace(/event:\w+/i, '')
@@ -64,11 +73,7 @@ searchRouter.get(
         .replace(/error:\w+/i, '')
         .trim();
 
-      const searchIndexEntries = await (
-        prismaRead as unknown as {
-          searchIndexEntry: { findMany: (args: unknown) => Promise<SearchIndexEntry[]> };
-        }
-      ).searchIndexEntry.findMany({
+      const searchIndexEntries = await (prisma as any).searchIndexEntry.findMany({
         where: {
           AND: [
             cleanQuery ? { content: { contains: cleanQuery, mode: 'insensitive' } } : undefined,
@@ -115,15 +120,11 @@ searchRouter.get(
           ].filter(Boolean),
         },
         select: { contractAddress: true, contentType: true, content: true, metadata: true },
-        take: parsedLimit,
-        skip: parsedOffset,
+        take: limit,
+        skip: offset,
       });
 
-      // Group by contract and facet
-      const results: Record<
-        string,
-        { address: string; hits: Record<string, Array<{ content: string; metadata: unknown }>> }
-      > = {};
+      const results: Record<string, any> = {};
       for (const entry of searchIndexEntries) {
         if (!results[entry.contractAddress]) {
           results[entry.contractAddress] = { address: entry.contractAddress, hits: {} };
@@ -138,7 +139,7 @@ searchRouter.get(
       }
 
       return res.json({
-        query: q,
+        query: trimmedQ,
         total: Object.keys(results).length,
         results: Object.values(results),
       });
@@ -149,27 +150,16 @@ searchRouter.get(
 );
 
 // GET /search/index — trigger re-indexing of all contracts
-searchRouter.get('/index', async (req: Request, res: Response) => {
+searchRouter.get('/index', async (_req: Request, res: Response) => {
   try {
-    // Fetch all contract sources and rebuild search index
-    const sources = await (
-      prismaRead as unknown as {
-        contractSource: { findMany: (args: unknown) => Promise<ContractSource[]> };
-      }
-    ).contractSource.findMany({
+    const sources = await (prisma as any).contractSource.findMany({
       include: { functionDetails: true },
     });
 
-    // Clear existing index
-    await (
-      prismaWrite as unknown as {
-        searchIndexEntry: { deleteMany: (args: unknown) => Promise<{ count: number }> };
-      }
-    ).searchIndexEntry.deleteMany({});
+    await (prismaWrite as any).searchIndexEntry.deleteMany({});
 
     let indexed = 0;
     for (const source of sources) {
-      // Index functions
       for (const fn of source.functionDetails || []) {
         await (
           prismaWrite as unknown as {
@@ -186,14 +176,8 @@ searchRouter.get('/index', async (req: Request, res: Response) => {
         indexed++;
       }
 
-      // Index imports
-      const imports = (source.imports as Array<Record<string, unknown>>) || [];
-      for (const imp of imports) {
-        await (
-          prismaWrite as unknown as {
-            searchIndexEntry: { create: (args: unknown) => Promise<unknown> };
-          }
-        ).searchIndexEntry.create({
+      for (const imp of (source.imports as any[]) || []) {
+        await (prismaWrite as any).searchIndexEntry.create({
           data: {
             contractAddress: source.contractAddress,
             contentType: 'import',
@@ -204,14 +188,8 @@ searchRouter.get('/index', async (req: Request, res: Response) => {
         indexed++;
       }
 
-      // Index exports
-      const exports = (source.exports as Array<Record<string, unknown>>) || [];
-      for (const exp of exports) {
-        await (
-          prismaWrite as unknown as {
-            searchIndexEntry: { create: (args: unknown) => Promise<unknown> };
-          }
-        ).searchIndexEntry.create({
+      for (const exp of (source.exports as any[]) || []) {
+        await (prismaWrite as any).searchIndexEntry.create({
           data: {
             contractAddress: source.contractAddress,
             contentType: 'export',
@@ -222,64 +200,40 @@ searchRouter.get('/index', async (req: Request, res: Response) => {
         indexed++;
       }
 
-      // Index events
-      const events = (source.events as unknown[]) || [];
-      if (Array.isArray(events)) {
-        for (const evt of events) {
-          await (
-            prismaWrite as unknown as {
-              searchIndexEntry: { create: (args: unknown) => Promise<unknown> };
-            }
-          ).searchIndexEntry.create({
-            data: {
-              contractAddress: source.contractAddress,
-              contentType: 'event',
-              content: JSON.stringify(evt),
-              metadata: evt,
-            },
-          });
-          indexed++;
-        }
+      for (const evt of (source.events as any[]) || []) {
+        await (prismaWrite as any).searchIndexEntry.create({
+          data: {
+            contractAddress: source.contractAddress,
+            contentType: 'event',
+            content: JSON.stringify(evt),
+            metadata: evt,
+          },
+        });
+        indexed++;
       }
 
-      // Index errors
-      const errors = (source.errors as unknown[]) || [];
-      if (Array.isArray(errors)) {
-        for (const err of errors) {
-          await (
-            prismaWrite as unknown as {
-              searchIndexEntry: { create: (args: unknown) => Promise<unknown> };
-            }
-          ).searchIndexEntry.create({
-            data: {
-              contractAddress: source.contractAddress,
-              contentType: 'error',
-              content: JSON.stringify(err),
-              metadata: err,
-            },
-          });
-          indexed++;
-        }
+      for (const err of (source.errors as any[]) || []) {
+        await (prismaWrite as any).searchIndexEntry.create({
+          data: {
+            contractAddress: source.contractAddress,
+            contentType: 'error',
+            content: JSON.stringify(err),
+            metadata: err,
+          },
+        });
+        indexed++;
       }
 
-      // Index storage variables
-      const storage = (source.storageVariables as unknown[]) || [];
-      if (Array.isArray(storage)) {
-        for (const stor of storage) {
-          await (
-            prismaWrite as unknown as {
-              searchIndexEntry: { create: (args: unknown) => Promise<unknown> };
-            }
-          ).searchIndexEntry.create({
-            data: {
-              contractAddress: source.contractAddress,
-              contentType: 'storage',
-              content: JSON.stringify(stor),
-              metadata: stor,
-            },
-          });
-          indexed++;
-        }
+      for (const stor of (source.storageVariables as any[]) || []) {
+        await (prismaWrite as any).searchIndexEntry.create({
+          data: {
+            contractAddress: source.contractAddress,
+            contentType: 'storage',
+            content: JSON.stringify(stor),
+            metadata: stor,
+          },
+        });
+        indexed++;
       }
     }
 
