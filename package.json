@@ -49,7 +49,24 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.600.0",
+    "@chainsafe/libp2p-gossipsub": "14.1.2",
+    "@chainsafe/libp2p-noise": "16.1.5",
+    "@chainsafe/libp2p-yamux": "7.0.4",
     "@graphql-tools/schema": "^10.0.33",
+    "@libp2p/bootstrap": "11.0.47",
+    "@libp2p/circuit-relay-v2": "3.2.24",
+    "@libp2p/crypto": "5.1.8",
+    "@libp2p/dcutr": "2.0.38",
+    "@libp2p/identify": "3.0.39",
+    "@libp2p/interface": "2.11.0",
+    "@libp2p/kad-dht": "15.1.11",
+    "@libp2p/logger": "5.2.0",
+    "@libp2p/mdns": "11.0.47",
+    "@libp2p/peer-id": "5.1.9",
+    "@libp2p/ping": "2.0.37",
+    "@libp2p/tcp": "10.1.19",
+    "@multiformats/dns": "1.0.9",
+    "@multiformats/multiaddr": "12.4.4",
     "@opentelemetry/api": "1.9.0",
     "@prisma/client": "^5.10.0",
     "@stellar/stellar-sdk": "^12.0.0",
@@ -66,8 +83,11 @@
     "graphql-query-complexity": "^1.1.1",
     "graphql-yoga": "^5.21.2",
     "helmet": "^7.1.0",
+    "it-length-prefixed": "^10.0.1",
+    "it-pipe": "^3.0.1",
     "jsonwebtoken": "^9.0.3",
     "kubo-rpc-client": "^7.1.0",
+    "libp2p": "2.10.0",
     "morgan": "^1.10.0",
     "multer": "^2.0.1",
     "node-forge": "^1.4.0",
@@ -77,11 +97,15 @@
     "source-map-support": "^0.5.21",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1",
+    "uint8arrays": "^5.1.0",
     "ws": "^8.13.0",
     "zod": "^3.22.4"
   },
   "optionalDependencies": {
     "rate-limit-redis": "^4.2.0"
+  },
+  "overrides": {
+    "@libp2p/interface": "2.11.0"
   },
   "lint-staged": {
     "*.ts": [
