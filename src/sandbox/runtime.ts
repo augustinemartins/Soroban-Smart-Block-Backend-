@@ -853,13 +853,16 @@ function executeTemplateFunction(
 
   const after = clone(next);
   const success = error === null;
+  const estimate = estimateTemplateCall(contract.templateId ?? 'generic', Object.keys(args).length);
+  const cpuInsnUsed = estimate.cpu + (success ? 0 : 500);
+  const memBytesUsed = estimate.mem + JSON.stringify(after).length - 1024;
   return {
     success,
     result,
     error,
     events,
-    cpuInsnUsed: 1500 + Object.keys(args).length * 250 + (success ? 0 : 500),
-    memBytesUsed: 1024 + JSON.stringify(after).length,
+    cpuInsnUsed,
+    memBytesUsed,
     readBytes: JSON.stringify(before).length,
     writeBytes: JSON.stringify(after).length,
     trace: traceTemplateStep(contract.contractId, functionName, before, after),
@@ -1338,12 +1341,14 @@ export class SandboxEngine {
           createdAt: new Date(),
         },
       });
+      const metrics = buildCallMetrics(outcome);
       return {
         callId: call.id,
         ...serializeCallResult(outcome),
         trace: outcome.trace,
         stateBefore: before,
         stateAfter: before,
+        metrics: serializeMetrics(metrics),
       };
     }
 
@@ -2104,18 +2109,7 @@ export default spec('${contract.name ?? 'contract'}_spec', '${contractId}', [
   }
 
   async replayMainnet(txHash: string): Promise<any> {
-    return {
-      txHash,
-      steps: [
-        { action: 'load_transaction' },
-        { action: 'simulate_execution' },
-        { action: 'compare_state' },
-      ],
-      comparison: {
-        equal: false,
-        note: 'mainnet replay is scaffolded against live RPC integration',
-      },
-    };
+    return replayMainnetOracle(txHash);
   }
 
   async forkContract(sessionId: string, contractAddress: string): Promise<any> {
