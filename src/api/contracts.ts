@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { fetchContractSpec } from '../indexer/wasm-spec';
 import { abiRouter } from './abi';
 import { validateAddressParam, isValidStellarAddress } from '../middleware/sanitize';
+import { contractAuditRouter } from './contract-audit';
 
 export const contractRouter = Router();
 
@@ -109,6 +110,11 @@ contractRouter.post('/', async (req: Request, res: Response) => {
     res.status(400).json({ error: String(e) });
   }
 });
+
+// ── Audit sub-router — /contracts/:address/audit/* ────────────────────────────
+// Must be mounted before /:address/simulate/* to avoid route shadowing.
+// The audit router uses mergeParams:true so req.params.address is available.
+contractRouter.use('/:address/audit', contractAuditRouter);
 
 // ── Contract Simulation Routes ────────────────────────────────────────────────
 

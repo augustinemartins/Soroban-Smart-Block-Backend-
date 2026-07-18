@@ -35,6 +35,8 @@ import {
   hashCertificate,
   signCertificate,
 } from './audit-engine';
+import { emitPostAuditAlerts } from './audit-monitor';
+import { anchorCertificateForPipeline } from '../lib/anchor-service';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -136,53 +138,23 @@ async function changedDimensions(
 // ── On-chain anchoring ────────────────────────────────────────────────────────
 
 /**
- * Simulates anchoring the certificate hash on Stellar by embedding it in a
- * transaction memo. In production this would submit a real Stellar transaction;
- * here we generate a deterministic placeholder tx hash so all downstream
- * fields are populated correctly without requiring a funded keypair.
+ * Delegates to anchor-service.ts which submits a real Stellar transaction
+ * (MEMO_HASH + ManageData) when ANCHOR_ENABLED=true and ANCHOR_SECRET_KEY
+ * is set; otherwise derives a deterministic simulation hash.
  */
 async function anchorOnChain(
   contractAddress: string,
-  certId: string,
+  certId:          string,
   certificateHash: string,
 ): Promise<string | null> {
   try {
-    // Derive a deterministic placeholder tx hash from cert data
-    // (replace with real Stellar SDK submission when keypair is available)
-    const anchorPayload = `audit-anchor:${contractAddress}:${certId}:${certificateHash}`;
-    const anchorTxHash = crypto
-      .createHash('sha256')
-      .update(anchorPayload)
-      .digest('hex');
-
-    await prismaWrite.auditCertificate.update({
-      where: { id: certId },
-      data: { anchorTxHash },
+    const result = await anchorCertificateForPipeline(certId, certificateHash);
+    logger.info('Certificate anchored', {
+      certId, txHash: result.txHash, simulated: result.simulated,
     });
-
-    // Record anchor event
-    await prismaWrite.auditEvent.create({
-      data: {
-        contractAddress,
-        certificateId: certId,
-        eventType: 'certificate_published',
-        triggerSource: 'automatic',
-        timestamp: new Date(),
-        details: {
-          action: 'on_chain_anchor',
-          anchorTxHash,
-          certificateHash,
-        } as import('@prisma/client').Prisma.InputJsonValue,
-      },
-    });
-
-    logger.info('Certificate anchored on-chain', { certId, anchorTxHash });
-    return anchorTxHash;
+    return result.txHash;
   } catch (e) {
-    logger.warn('On-chain anchoring failed (non-fatal)', {
-      certId,
-      error: String(e),
-    });
+    logger.warn('On-chain anchoring failed (non-fatal)', { certId, error: String(e) });
     return null;
   }
 }
@@ -453,6 +425,12 @@ export async function runAuditPipeline(opts: PipelineOptions): Promise<PipelineR
     subscribersNotified,
     durationMs,
   });
+
+  // Emit WS score-drop + finding alerts now that the cert is persisted.
+  // Fire-and-forget — never block the pipeline result.
+  emitPostAuditAlerts(contractAddress, certId).catch((e) =>
+    logger.warn('emitPostAuditAlerts failed', { certId, error: String(e) }),
+  );
 
   return {
     certId,

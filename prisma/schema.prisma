@@ -2824,19 +2824,29 @@ model AuditEvent {
 model ExternalAudit {
   id                     String   @id @default(cuid())
   contractAddress        String
+  // Link to verified auditor registry (null for unregistered submissions)
+  auditorId              String?
   auditorName            String
   auditorVerificationKey String?
   reportType             String   // "security_audit" | "formal_verification" | "economic_audit"
   reportUrl              String?
   reportHash             String?  // SHA-256 of report for tamper-detection
+  reportSignature        String?  // signature over reportHash using auditor's verificationKey
   findings               Json?
   overallGrade           String?  // "pass" | "conditional_pass" | "fail"
+  summary                String?  // brief text summary
   submittedAt            DateTime
   verifiedAt             DateTime?
   verificationStatus     String   // "pending" | "verified" | "rejected"
+  rejectionReason        String?
+  // Display on platform
+  isPublic               Boolean  @default(true)
   createdAt              DateTime @default(now())
 
+  auditor AuditorRegistry? @relation(fields: [auditorId], references: [id])
+
   @@index([contractAddress])
+  @@index([auditorId])
   @@index([verificationStatus])
   @@index([submittedAt(sort: Desc)])
 }
@@ -2847,13 +2857,53 @@ model AuditSubscription {
   userId          String?
   contractAddress String
   alertTypes      String[] // "score_drop" | "new_finding" | "upgrade" | "certificate_update"
-  threshold       Int?     // minimum score-drop magnitude to trigger (e.g. 10 points)
+  threshold       Int?     // minimum score-drop magnitude to trigger a score_drop alert
+
+  // Delivery channels — at least one must be configured
+  // email
+  emailAddress    String?
+  // webhook
+  webhookUrl      String?
+  webhookSecret   String?  // HMAC-SHA256 signing secret for webhook payloads
+  // Slack
+  slackWebhookUrl String?
+  slackChannel    String?  // optional channel override e.g. "#audit-alerts"
+
   isActive        Boolean  @default(true)
+  // Cooldown: don't fire the same alertType more than once per this window (minutes)
+  cooldownMinutes Int      @default(60)
+  lastTriggeredAt DateTime?
+
   createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  deliveries AuditNotificationDelivery[]
 
   @@index([userId])
   @@index([contractAddress])
   @@index([isActive])
+}
+
+// Delivery log — one row per notification attempt
+model AuditNotificationDelivery {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  alertType      String   // "score_drop" | "new_finding" | "upgrade" | "certificate_update"
+  channel        String   // "email" | "webhook" | "slack"
+  status         String   @default("pending")  // "pending" | "success" | "failed"
+  payload        Json     // the notification payload that was sent
+  httpStatus     Int?     // for webhook / slack
+  responseBody   String?  // first 500 chars
+  errorMsg       String?
+  attempt        Int      @default(1)
+  deliveredAt    DateTime?
+  createdAt      DateTime @default(now())
+
+  subscription AuditSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
 }
 
 // Public certificate verification log — every verification attempt recorded
@@ -2868,4 +2918,100 @@ model AuditVerificationRecord {
   @@index([certificateHash])
   @@index([checkedAt(sort: Desc)])
 }
-// ─── End Smart Contract Audit Trail & Certificate Platform ────────────────────
+
+// ── Auditor Registry ──────────────────────────────────────────────────────────
+
+// Registered and verified third-party audit firms
+model AuditorRegistry {
+  id                  String   @id @default(cuid())
+  name                String   @unique  // "CertiK" | "Trail of Bits" | etc.
+  slug                String   @unique  // url-safe slug, e.g. "certik"
+  website             String?
+  logoUrl             String?
+  description         String?
+  // Contact and identity
+  contactEmail        String?
+  twitterHandle       String?
+  githubOrg           String?
+  // Verification
+  verificationKey     String?  @unique  // Ed25519 / ECDSA public key for signature verification
+  verificationKeyAlgo String?           // "ed25519" | "ecdsa-p256"
+  isVerified          Boolean  @default(false)
+  verifiedAt          DateTime?
+  verifiedBy          String?           // admin key or address that verified
+  // Trust metrics
+  trustScore          Int      @default(50)  // 0-100
+  totalAudits         Int      @default(0)
+  acceptedAudits      Int      @default(0)
+  rejectedAudits      Int      @default(0)
+  // Badge
+  badgeTier           String?           // "platinum" | "gold" | "silver" | "bronze" | null
+  specializations     String[]          // "defi" | "nft" | "bridge" | "staking" | etc.
+  // Status
+  isActive            Boolean  @default(true)
+  suspendedAt         DateTime?
+  suspendReason       String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  submissions ExternalAudit[]
+
+  @@index([isVerified])
+  @@index([trustScore(sort: Desc)])
+  @@index([slug])
+}
+
+// ─── Formal Verification Integration ─────────────────────────────────────────
+
+// Supported formal verification tools
+enum FormalVerifTool {
+  certora       // Certora Prover (spec-based deductive verification)
+  scribble      // Scribble (annotation-based runtime verification)
+  halo2         // Halo2 ZK proof framework
+  smtchecker    // SMT-based bounded model checking
+  manual        // Human-submitted formal verification report
+}
+
+model FormalVerificationJob {
+  id               String           @id @default(cuid())
+  contractAddress  String
+  tool             FormalVerifTool
+  status           String           @default("pending")
+  // "pending" | "running" | "passed" | "failed" | "timeout" | "unsupported"
+
+  // Input
+  sourceJobId      String?          // linked VerificationJob (source code)
+  specContent      String?          // tool-specific spec / annotation file content
+  specFileName     String?
+  toolVersion      String?
+  toolOptions      Json?            // extra tool-specific options
+
+  // Results
+  passed           Boolean?
+  propertyCount    Int?             // total properties / rules checked
+  provenCount      Int?             // properties formally proven
+  violatedCount    Int?             // properties with counter-examples
+  unknownCount     Int?             // timeouts / out-of-scope
+  counterExamples  Json?            // [{property, trace, description}]
+  coveragePercent  Float?           // 0-100 bytecode / source coverage
+  toolOutput       String?          // raw stdout/stderr (truncated at 10 KB)
+  reportUrl        String?          // link to external tool dashboard
+
+  // Timing
+  startedAt        DateTime?
+  completedAt      DateTime?
+  durationSeconds  Int?
+
+  // Audit integration
+  certId           String?          // linked AuditCertificate id (once published)
+  triggeredBy      String           @default("manual")
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([contractAddress])
+  @@index([tool])
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+}
+// ─── End Formal Verification Integration ─────────────────────────────────────
