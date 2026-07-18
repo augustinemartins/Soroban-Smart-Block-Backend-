@@ -232,18 +232,20 @@ model PropagationAnalysis {
   @@index([vulnerableContract])
 }
 
-model DexPool {
-  id             String   @id @default(cuid())
-  address        String   @unique
-  name           String?
-  tvlUsd         Decimal  @default(0)
-  tokenA         String?
-  tokenB         String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+// Duplicate DexPool model removed to avoid conflicts with the actual definition
+// model DexPool {
+//   id             String   @id @default(cuid())
+//   address        String   @unique
+//   name           String?
+//   tvlUsd         Decimal  @default(0)
+//   tokenA         String?
+//   tokenB         String?
+//   createdAt      DateTime @default(now())
+//   updatedAt      DateTime @updatedAt
+// 
+//   @@index([address])
+// }
 
-  @@index([address])
-}
 
 model IndexerState {
   id         String   @id @default("singleton")
@@ -4457,3 +4459,76 @@ model RampAmlFlag {
   @@index([createdAt(sort: Desc)])
   @@map("ramp_aml_flags")
 }
+
+// ─── Real-Time On-Chain Fraud Detection Engine (Issue #553) ─────────────────
+
+model FraudAlert {
+  id                String   @id @default(cuid())
+  transactionHash   String   @map("transaction_hash")
+  targetAddress     String   @map("target_address")
+  riskScore         Float    @map("risk_score")
+  severity          String
+  alertType         String   @map("alert_type")
+  explanation       Json
+  mitigationApplied Boolean  @default(false) @map("mitigation_applied")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@index([transactionHash])
+  @@index([targetAddress])
+  @@index([severity])
+  @@index([alertType])
+  @@map("fraud_alerts")
+}
+
+model FeatureStoreEntry {
+  id         String   @id @default(cuid())
+  entityId   String   @unique @map("entity_id")
+  entityType String   @map("entity_type")
+  features   Json
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([entityId])
+  @@map("fraud_feature_store")
+}
+
+model ModelRegistryEntry {
+  id         String   @id @default(cuid())
+  name       String
+  type       String
+  version    String
+  status     String
+  metrics    Json
+  parameters Json
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@unique([name, version])
+  @@map("fraud_model_registry")
+}
+
+model ModelDriftMetrics {
+  id                     String   @id @default(cuid())
+  modelId                String   @map("model_id")
+  featureDrifts          Json     @map("feature_drifts")
+  predictionDrift        Float    @map("prediction_drift")
+  driftThresholdExceeded Boolean  @map("drift_threshold_exceeded")
+  timestamp              DateTime @default(now())
+
+  @@index([modelId])
+  @@map("fraud_model_drift")
+}
+
+model FraudRetrainingLog {
+  id             String   @id @default(cuid())
+  modelId        String   @map("model_id")
+  status         String
+  datasetSize    Int      @map("dataset_size")
+  accuracyAfter  Float    @map("accuracy_after")
+  precisionAfter Float    @map("precision_after")
+  recallAfter    Float    @map("recall_after")
+  completedAt    DateTime @default(now()) @map("completed_at")
+
+  @@map("fraud_retraining_logs")
+}
+

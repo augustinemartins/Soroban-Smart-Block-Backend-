@@ -56,8 +56,10 @@ import { sandboxRouter } from './sandbox';
 // ── Freeze Management ─────────────────────────────────────────────────────────
 
 // ── Predictive Analytics ──────────────────────────────────────────────────────
+import { fraudRouter } from './fraud';
 
 export const router = Router();
+
 
 // ── Core Stellar / Soroban ────────────────────────────────────────────────────
 router.use('/i18n', i18nRouter);
@@ -91,6 +93,9 @@ router.use('/exports', exportsRouter);
 router.use('/admin/rate-limits', rateLimitAdminRouter);
 router.use('/market/alerts', alertsRouter);
 router.use('/oracles/intelligence', oracleIntelligenceRouter);
+
+// ── Predictive Analytics ──────────────────────────────────────────────────────
+router.use('/fraud', fraudRouter);
 
 // ── Natural Language Query Interface (#328) ───────────────────────────────────
 // nlq invokes LLM APIs — compute-heavy and billed per request; key required
