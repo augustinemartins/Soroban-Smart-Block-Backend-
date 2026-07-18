@@ -1,7 +1,7 @@
 import { xdr, scValToNative } from '@stellar/stellar-sdk';
 import { prismaWrite as prisma } from '../db';
 
-interface ZkpProofData {
+export interface ZkpProofData {
   proofType: string;
   publicInputHash: string;
   verified: boolean;
@@ -14,7 +14,7 @@ interface ZkpProofData {
  */
 export function decodeZkpVerification(
   functionName: string,
-  args: xdr.ScVal[]
+  args: xdr.ScVal[],
 ): ZkpProofData | null {
   // Detect ZKP verifier patterns
   const zkpPatterns = ['verify_proof', 'verify_snark', 'verify_stark', 'verify_groth16'];
@@ -86,7 +86,7 @@ export async function recordZkpVerification(
   contractAddress: string,
   zkpData: ZkpProofData,
   ledgerSequence: number,
-  ledgerCloseTime: Date
+  ledgerCloseTime: Date,
 ): Promise<void> {
   await prisma.zkpVerificationEvent.create({
     data: {
@@ -94,7 +94,7 @@ export async function recordZkpVerification(
       contractAddress,
       proofType: zkpData.proofType,
       publicInputHash: zkpData.publicInputHash,
-      verificationResult: zkpData.verified ? 'verified' : 'failed',
+      verificationResult: zkpData.verified,
       certaintyPercent: zkpData.certaintyPercent,
       ledgerSequence,
       ledgerCloseTime,
@@ -115,10 +115,7 @@ export function formatZkpVerification(zkpData: ZkpProofData): string {
 /**
  * Retrieve ZKP verification history for a contract.
  */
-export async function getZkpVerificationHistory(
-  contractAddress: string,
-  limit: number = 50
-) {
+export async function getZkpVerificationHistory(contractAddress: string, limit: number = 50) {
   const events = await prisma.zkpVerificationEvent.findMany({
     where: { contractAddress },
     orderBy: { ledgerSequence: 'desc' },
@@ -134,14 +131,22 @@ export async function getZkpVerificationHistory(
     },
   });
 
-  return events.map((e) => ({
-    id: e.id,
-    txHash: e.transactionHash,
-    proofType: e.proofType,
-    result: e.verificationResult,
-    certainty: e.certaintyPercent,
-    humanReadable: `${e.verificationResult === 'verified' ? 'Verified' : 'Failed'} ZK-${e.proofType.toUpperCase()} proof (${e.certaintyPercent?.toFixed(1) ?? '99.9'}% certainty)`,
-    ledger: e.ledgerSequence,
-    timestamp: e.ledgerCloseTime,
-  }));
+  return events.map((e) => {
+    const zkpData: ZkpProofData = {
+      proofType: e.proofType ?? 'unknown',
+      publicInputHash: '',
+      verified: e.verificationResult ?? false,
+      certaintyPercent: e.certaintyPercent ?? undefined,
+    };
+    return {
+      id: e.id,
+      txHash: e.transactionHash,
+      proofType: e.proofType,
+      result: e.verificationResult === true ? 'verified' : 'failed',
+      certainty: e.certaintyPercent,
+      humanReadable: formatZkpVerification(zkpData),
+      ledger: e.ledgerSequence,
+      timestamp: e.ledgerCloseTime,
+    };
+  });
 }

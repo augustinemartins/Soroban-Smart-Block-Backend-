@@ -85,7 +85,7 @@ interface PriceNode {
 
 export interface PriceGraph {
   nodes: Map<string, PriceNode[]>; // token → [pool edges]
-  edges: Map<string, number>;       // "tokenA:tokenB:poolId" → log-price
+  edges: Map<string, number>; // "tokenA:tokenB:poolId" → log-price
 }
 
 /** Build a directed price graph from active pool prices. */
@@ -136,7 +136,9 @@ export async function buildPriceGraph(): Promise<PriceGraph> {
     // B→A direction (inverse price)
     const baKey = pool.tokenB;
     if (!nodes.has(baKey)) nodes.set(baKey, []);
-    nodes.get(baKey)!.push({ ...node, tokenA: pool.tokenB, tokenB: pool.tokenA, spotPrice: 1 / price });
+    nodes
+      .get(baKey)!
+      .push({ ...node, tokenA: pool.tokenB, tokenB: pool.tokenA, spotPrice: 1 / price });
     edges.set(`${pool.tokenB}:${pool.tokenA}:${pool.id}`, -Math.log((1 / price) * (1 - feeTier)));
   }
 
@@ -148,7 +150,7 @@ export async function buildPriceGraph(): Promise<PriceGraph> {
 // ─── Bellman-Ford Negative Cycle Detection (arbitrage = negative log-price cycle) ───
 
 interface ArbitrageCycle {
-  path: string[];    // token addresses in cycle
+  path: string[]; // token addresses in cycle
   poolIds: string[];
   dexNames: string[];
   profitMultiplier: number; // e.g. 1.008 = 0.8% profit
@@ -182,45 +184,45 @@ export function detectNegativeCycles(graph: PriceGraph, maxHops = 5): ArbitrageC
       }
     }
 
-    // Check for negative cycles (arbitrage opportunities)
+    // Check for negative cycles via Nth-pass relaxation (standard Bellman-Ford)
     for (const [edgeKey, weight] of graph.edges) {
       const [from, to, poolId] = edgeKey.split(':');
       const df = dist.get(from) ?? Infinity;
       const dt = dist.get(to) ?? Infinity;
       if (df + weight < dt && to === startToken && df !== Infinity) {
-        // Reconstruct cycle path
-        const path: string[] = [startToken];
+        // Reconstruct cycle path in forward order
+        const reverseNodes: string[] = [];
         const poolIds: string[] = [];
         const dexNames: string[] = [];
 
         let cur = from;
         let safetyNet = 0;
         while (cur !== startToken && safetyNet < maxHops) {
-          path.unshift(cur);
+          reverseNodes.push(cur);
           const p = prev.get(cur);
           if (!p) break;
-          poolIds.unshift(p.poolId);
-          dexNames.unshift(p.dex);
+          poolIds.push(p.poolId);
+          dexNames.push(p.dex);
           cur = p.token;
           safetyNet++;
         }
+        const path = [startToken, ...reverseNodes.reverse()];
         poolIds.push(poolId);
         const node = Array.from(graph.nodes.get(from) ?? []).find((n) => n.poolId === poolId);
         dexNames.push(node?.dexName ?? '');
 
         const cycleKey = [...path].sort().join('-');
-        if (!seen.has(cycleKey) && path.length >= 2) {
+        if (!seen.has(cycleKey)) {
           seen.add(cycleKey);
-          // Calculate profit multiplier from accumulated log-price
           const totalLogCost = poolIds.reduce((acc, pid, idx) => {
             const tk = path[idx];
-            const tkNext = path[idx + 1] ?? startToken;
+            const tkNext = path[idx + 1] ?? path[0];
             const w = graph.edges.get(`${tk}:${tkNext}:${pid}`) ?? 0;
             return acc + w;
           }, 0);
           const profitMultiplier = Math.exp(-totalLogCost);
-          if (profitMultiplier > 1.0001) { // minimum 0.01% profit threshold
-            cycles.push({ path: [...path, startToken], poolIds, dexNames, profitMultiplier });
+          if (profitMultiplier > 1.0001) {
+            cycles.push({ path, poolIds, dexNames, profitMultiplier });
           }
         }
       }
@@ -236,15 +238,25 @@ export interface DirectArbitrageResult {
   pair: string;
   tokenA: string;
   tokenB: string;
-  buyPool: { id: string; dexName: string; contractAddress: string; price: number; liquidity: number };
-  sellPool: { id: string; dexName: string; contractAddress: string; price: number; liquidity: number };
+  buyPool: {
+    id: string;
+    dexName: string;
+    contractAddress: string;
+    price: number;
+    liquidity: number;
+  };
+  sellPool: {
+    id: string;
+    dexName: string;
+    contractAddress: string;
+    price: number;
+    liquidity: number;
+  };
   profitPercentage: number;
   confidence: number;
 }
 
-export async function detectDirectArbitrage(
-  minProfitPct = 0.1,
-): Promise<DirectArbitrageResult[]> {
+export async function detectDirectArbitrage(minProfitPct = 0.1): Promise<DirectArbitrageResult[]> {
   const cacheKey = `arb:direct:${minProfitPct}`;
   const cached = await cacheGet<DirectArbitrageResult[]>(cacheKey);
   if (cached) return cached;
@@ -280,16 +292,15 @@ export async function detectDirectArbitrage(
         const priceB = Number(pB.poolPrices[0].spotPrice);
         if (priceA <= 0 || priceB <= 0) continue;
 
-        const deviation = Math.abs(priceA - priceB) / Math.min(priceA, priceB) * 100;
+        const deviation = (Math.abs(priceA - priceB) / Math.min(priceA, priceB)) * 100;
         if (deviation < minProfitPct) continue;
 
         // Buy from cheaper, sell to more expensive
         const [buyPool, sellPool, buyPrice, sellPrice] =
-          priceA < priceB
-            ? [pA, pB, priceA, priceB]
-            : [pB, pA, priceB, priceA];
+          priceA < priceB ? [pA, pB, priceA, priceB] : [pB, pA, priceB, priceA];
 
-        const feeCost = (Number(buyPool.feeTier ?? 0.003) + Number(sellPool.feeTier ?? 0.003)) * 100;
+        const feeCost =
+          (Number(buyPool.feeTier ?? 0.003) + Number(sellPool.feeTier ?? 0.003)) * 100;
         const netProfit = deviation - feeCost;
         if (netProfit < minProfitPct) continue;
 
@@ -336,7 +347,14 @@ export function computeMevScore(params: {
   liquiditySellPool: number;
   competingBotCount?: number;
 }): MevScore {
-  const { profitPercentage, capitalRequired, hops, liquidityBuyPool, liquiditySellPool, competingBotCount = 3 } = params;
+  const {
+    profitPercentage,
+    capitalRequired,
+    hops,
+    liquidityBuyPool,
+    liquiditySellPool,
+    competingBotCount = 3,
+  } = params;
 
   // Profitability (30%): scale 0-100 based on profit %
   const profitabilityScore = Math.min(100, profitPercentage * 20);
@@ -351,7 +369,13 @@ export function computeMevScore(params: {
 
   // Competition (15%): inverse of competing bots
   const competitionLevel: MevScore['competitionLevel'] =
-    competingBotCount <= 1 ? 'low' : competingBotCount <= 3 ? 'medium' : competingBotCount <= 7 ? 'high' : 'extreme';
+    competingBotCount <= 1
+      ? 'low'
+      : competingBotCount <= 3
+        ? 'medium'
+        : competingBotCount <= 7
+          ? 'high'
+          : 'extreme';
   const competitionScore = Math.max(0, 100 - competingBotCount * 12);
 
   // Slippage risk (10%): based on capital vs pool liquidity
@@ -362,12 +386,12 @@ export function computeMevScore(params: {
   const frontrunningRisk = Math.min(100, profitPercentage * 10);
 
   const overallScore = Math.round(
-    profitabilityScore * 0.30 +
-    (capitalEfficiency * 1000) * 0.20 +
-    speedScore * 0.20 +
-    competitionScore * 0.15 +
-    (100 - slippageRisk) * 0.10 +
-    (100 - frontrunningRisk) * 0.05,
+    profitabilityScore * 0.3 +
+      capitalEfficiency * 1000 * 0.2 +
+      speedScore * 0.2 +
+      competitionScore * 0.15 +
+      (100 - slippageRisk) * 0.1 +
+      (100 - frontrunningRisk) * 0.05,
   );
 
   const recommendation: MevScore['recommendation'] =
@@ -406,17 +430,23 @@ export async function simulateExecution(params: {
   });
   if (!opp) throw new Error(`Opportunity ${opportunityId} not found`);
 
-  const route = opp.route as RouteStep[];
+  const route = opp.route as unknown as RouteStep[];
   const profitPct = Number(opp.profitPercentage) / 100;
   const grossProfit = capital * profitPct;
   const estimatedGas = 0.5; // 0.5 XLM estimated gas per arb tx
   const netProfit = grossProfit - estimatedGas;
-  const roi = (netProfit / capital * 100).toFixed(4);
+  const roi = ((netProfit / capital) * 100).toFixed(4);
 
   // Build execution plan from route
   const steps: SimulationStep[] = route.map((step, idx) => {
     const amountIn = idx === 0 ? capital.toString() : 'prev_output';
-    const priceImpact = (capital / Math.max(1, Number(idx === 0 ? opp.buyPool?.totalLiquidity : opp.sellPool?.totalLiquidity) ?? 100000)) * 100;
+    const priceImpact =
+      (capital /
+        Math.max(
+          1,
+          Number(idx === 0 ? opp.buyPool?.totalLiquidity : opp.sellPool?.totalLiquidity) ?? 100000,
+        )) *
+      100;
     return {
       step: idx + 1,
       action: step.action,
@@ -429,7 +459,8 @@ export async function simulateExecution(params: {
     };
   });
 
-  const slippageRiskLabel = slippageTolerance < 0.003 ? 'low' : slippageTolerance < 0.01 ? 'medium' : 'high';
+  const slippageRiskLabel =
+    slippageTolerance < 0.003 ? 'low' : slippageTolerance < 0.01 ? 'medium' : 'high';
   const frRisk = Number(opp.mevScore?.frontrunningRisk ?? 0.05);
   const frontrunningRiskLabel = frRisk < 0.2 ? 'low' : frRisk < 0.5 ? 'medium' : 'high';
 
@@ -453,13 +484,15 @@ export async function simulateExecution(params: {
   };
 }
 
-export async function simulateCustomRoute(route: Array<{
-  dex: string;
-  poolId: string;
-  action: string;
-  token: string;
-  amount?: string;
-}>): Promise<SimulationResult & { customRoute: boolean }> {
+export async function simulateCustomRoute(
+  route: Array<{
+    dex: string;
+    poolId: string;
+    action: string;
+    token: string;
+    amount?: string;
+  }>,
+): Promise<SimulationResult & { customRoute: boolean }> {
   const totalCapital = parseFloat(route[0]?.amount ?? '0');
   const profitEstimate = totalCapital * 0.005; // 0.5% default estimate for custom
 
@@ -481,7 +514,7 @@ export async function simulateCustomRoute(route: Array<{
       grossProfit: profitEstimate.toFixed(2),
       estimatedGas: '0.50',
       netProfit: (profitEstimate - 0.5).toFixed(2),
-      roi: `${(profitEstimate / totalCapital * 100).toFixed(4)}%`,
+      roi: `${((profitEstimate / totalCapital) * 100).toFixed(4)}%`,
     },
     executionPlan: { steps },
     riskAssessment: {
@@ -545,8 +578,8 @@ export async function persistOpportunity(
       buyPrice: direct.buyPool.price,
       sellPrice: direct.sellPool.price,
       profitPercentage: direct.profitPercentage,
-      profitEstimate,
-      capitalRequired,
+      profitEstimate: profitEstimate.toString(),
+      capitalRequired: capitalRequired.toString(),
       confidence: direct.confidence,
       route: route as unknown as Prisma.InputJsonValue,
       status: 'active',
@@ -607,7 +640,11 @@ export async function detectAndUpdateBots(): Promise<void> {
     // Calculate success rate
     const [success, total] = await Promise.all([
       prismaRead.transaction.count({
-        where: { sourceAccount: addr, status: 'success', functionName: { contains: 'swap', mode: 'insensitive' } },
+        where: {
+          sourceAccount: addr,
+          status: 'success',
+          functionName: { contains: 'swap', mode: 'insensitive' },
+        },
       }),
       prismaRead.transaction.count({
         where: { sourceAccount: addr, functionName: { contains: 'swap', mode: 'insensitive' } },
@@ -669,7 +706,10 @@ export async function inferBotStrategy(address: string) {
     hours[tx.ledgerCloseTime.getUTCHours()]++;
   }
 
-  const topDexs = [...dexCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([addr]) => addr);
+  const topDexs = [...dexCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([addr]) => addr);
   const avgGas = fees.length > 0 ? fees.reduce((a, b) => a + b, 0) / fees.length : 0;
   const maxGas = fees.length > 0 ? Math.max(...fees) : 0;
 
@@ -699,7 +739,9 @@ export async function inferBotStrategy(address: string) {
       },
       activeHours,
     },
-    strategySignature: `0x${Buffer.from(address + bot.totalTrades).toString('hex').slice(0, 16)}`,
+    strategySignature: `0x${Buffer.from(address + bot.totalTrades)
+      .toString('hex')
+      .slice(0, 16)}`,
   };
 }
 
@@ -712,9 +754,10 @@ export async function detectSandwichAttacks(ledgerSeq: number): Promise<void> {
     orderBy: { id: 'asc' },
   });
 
-  const swapTxs = txs.filter((tx) =>
-    tx.functionName?.toLowerCase().includes('swap') ||
-    tx.events.some((e) => e.eventType === 'swap'),
+  const swapTxs = txs.filter(
+    (tx) =>
+      tx.functionName?.toLowerCase().includes('swap') ||
+      tx.events.some((e) => e.eventType === 'swap'),
   );
 
   const byContract = new Map<string, typeof swapTxs>();
@@ -753,14 +796,16 @@ export async function detectSandwichAttacks(ledgerSeq: number): Promise<void> {
           },
           create: {
             id: `${front.hash.slice(0, 8)}-${victim.hash.slice(0, 8)}-${back.hash.slice(0, 8)}`,
-            pair: pool ? `${pool.tokenASymbol ?? pool.tokenA.slice(0, 6)}/${pool.tokenBSymbol ?? pool.tokenB.slice(0, 6)}` : 'UNKNOWN',
+            pair: pool
+              ? `${pool.tokenASymbol ?? pool.tokenA.slice(0, 6)}/${pool.tokenBSymbol ?? pool.tokenB.slice(0, 6)}`
+              : 'UNKNOWN',
             dex: pool?.dexName ?? contractAddress.slice(0, 12),
             victimTx: victim.hash,
             victimAddress: victim.sourceAccount,
             victimSlippage: slippagePct,
-            victimLoss: BigInt(Math.round(slippagePct * 100)),
+            victimLoss: String(Math.round(slippagePct * 100)),
             attackerAddress: front.sourceAccount,
-            attackerProfit: BigInt(Math.round(slippagePct * 90)),
+            attackerProfit: String(Math.round(slippagePct * 90)),
             frontRunTx: front.hash,
             backRunTx: back.hash,
             blockNumber: BigInt(ledgerSeq),
@@ -868,7 +913,11 @@ export async function getMarketAnalytics() {
 
 // ─── Historical Replay ────────────────────────────────────────────────────────
 
-export async function replayBlock(blockNumber: number, capital: number = 10000, minProfit: number = 0.1) {
+export async function replayBlock(
+  blockNumber: number,
+  capital: number = 10000,
+  minProfit: number = 0.1,
+) {
   const txs = await prismaRead.transaction.findMany({
     where: { ledgerSequence: blockNumber },
     include: { events: true },
@@ -908,7 +957,7 @@ export async function replayBlock(blockNumber: number, capital: number = 10000, 
     if (prices.length < 2) continue;
     const min = Math.min(...prices);
     const max = Math.max(...prices);
-    const deviation = (max - min) / min * 100;
+    const deviation = ((max - min) / min) * 100;
     if (deviation < minProfit) continue;
 
     missed.push({
@@ -917,7 +966,7 @@ export async function replayBlock(blockNumber: number, capital: number = 10000, 
       profitPercentage: deviation,
       route: [],
       capital,
-      estimatedProfit: capital * deviation / 100,
+      estimatedProfit: (capital * deviation) / 100,
     });
   }
 

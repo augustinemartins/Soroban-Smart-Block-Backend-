@@ -5,6 +5,7 @@
  */
 
 import { logger } from '../logger';
+import { background } from '../utils/background';
 import {
   detectDirectArbitrage,
   buildPriceGraph,
@@ -17,8 +18,8 @@ import {
 import { broadcastArbitrageOpportunity } from '../ws/arbitrageBroadcaster';
 import { prismaRead, prismaWrite } from '../db';
 
-const SCAN_INTERVAL_MS = 1000;        // 1 second price scan
-const BOT_SCAN_INTERVAL_MS = 300000;  // 5 minutes bot scan
+const SCAN_INTERVAL_MS = 1000; // 1 second price scan
+const BOT_SCAN_INTERVAL_MS = 300000; // 5 minutes bot scan
 const SANDWICH_SCAN_INTERVAL_MS = 5000; // 5 seconds sandwich scan
 
 let scannerRunning = false;
@@ -128,12 +129,12 @@ export function startArbitrageScanner() {
 
   // Opportunity scan every second
   setInterval(() => {
-    scanOpportunities().catch(() => {});
+    background('arbitrage.scanOpportunities', () => scanOpportunities().then(() => {}));
   }, SCAN_INTERVAL_MS);
 
   // Sandwich detection every 5 seconds
   setInterval(() => {
-    scanSandwiches().catch(() => {});
+    background('arbitrage.scanSandwiches', () => scanSandwiches().then(() => {}));
   }, SANDWICH_SCAN_INTERVAL_MS);
 
   // Bot detection every 5 minutes
@@ -144,5 +145,5 @@ export function startArbitrageScanner() {
   }, BOT_SCAN_INTERVAL_MS);
 
   // Run initial scan immediately
-  scanOpportunities().catch(() => {});
+  background('arbitrage.scanOpportunities', () => scanOpportunities().then(() => {}));
 }

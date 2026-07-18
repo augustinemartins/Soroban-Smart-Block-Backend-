@@ -12,8 +12,12 @@ import path from 'path';
 import { Writable } from 'stream';
 import { Prisma } from '@prisma/client';
 import { prismaRead, prismaWrite } from '../db';
+import { config } from '../config';
 
-const EXPORT_DIR = process.env.EXPORT_DIR ?? '/tmp/soroban-exports';
+function getExportDir(): string {
+  return process.env.EXPORT_DIR ?? config.exportDir;
+}
+
 const BATCH_SIZE = 500; // rows fetched per DB round-trip
 
 // ---------------------------------------------------------------------------
@@ -39,13 +43,29 @@ function rowToCsv(headers: string[], obj: Record<string, unknown>): string {
 // ---------------------------------------------------------------------------
 
 const TX_HEADERS = [
-  'hash', 'ledgerSequence', 'ledgerCloseTime', 'sourceAccount',
-  'contractAddress', 'functionName', 'status', 'humanReadable', 'feeCharged', 'createdAt',
+  'hash',
+  'ledgerSequence',
+  'ledgerCloseTime',
+  'sourceAccount',
+  'contractAddress',
+  'functionName',
+  'status',
+  'humanReadable',
+  'feeCharged',
+  'createdAt',
 ];
 
 const EVENT_HEADERS = [
-  'id', 'transactionHash', 'contractAddress', 'eventType',
-  'topics', 'data', 'decoded', 'ledgerSequence', 'ledgerCloseTime', 'createdAt',
+  'id',
+  'transactionHash',
+  'contractAddress',
+  'eventType',
+  'topics',
+  'data',
+  'decoded',
+  'ledgerSequence',
+  'ledgerCloseTime',
+  'createdAt',
 ];
 
 async function streamTransactions(
@@ -82,10 +102,7 @@ async function streamTransactions(
   return total;
 }
 
-async function streamEvents(
-  filters: Record<string, unknown>,
-  out: Writable,
-): Promise<number> {
+async function streamEvents(filters: Record<string, unknown>, out: Writable): Promise<number> {
   out.write(EVENT_HEADERS.join(',') + '\n');
 
   const where = buildEventWhere(filters);
@@ -152,9 +169,16 @@ function buildEventWhere(f: Record<string, unknown>) {
 // ---------------------------------------------------------------------------
 
 const WALLET_HISTORY_HEADERS = [
-  'type', 'hash', 'ledgerSequence', 'ledgerCloseTime',
-  'contractAddress', 'functionName', 'status', 'humanReadable',
-  'feeCharged', 'createdAt',
+  'type',
+  'hash',
+  'ledgerSequence',
+  'ledgerCloseTime',
+  'contractAddress',
+  'functionName',
+  'status',
+  'humanReadable',
+  'feeCharged',
+  'createdAt',
 ];
 
 async function streamWalletHistory(
@@ -221,14 +245,18 @@ async function streamWalletHistory(
 export async function enqueueExport(
   exportType: 'transactions' | 'events' | 'wallet_history',
   filters: Record<string, unknown> = {},
+  developerId: string,
 ): Promise<string> {
   const job = await prismaWrite.exportJob.create({
-    data: { exportType, filters: filters as Prisma.InputJsonValue, status: 'pending' },
+    data: {
+      exportType,
+      filters: filters as Prisma.InputJsonValue,
+      status: 'pending',
+      developerId,
+    },
   });
   // Fire-and-forget; caller can poll job status
-  runExportJob(job.id).catch((err) =>
-    console.error(`[csv-exporter] job ${job.id} failed:`, err),
-  );
+  runExportJob(job.id).catch((err) => console.error(`[csv-exporter] job ${job.id} failed:`, err));
   return job.id;
 }
 
@@ -242,10 +270,11 @@ export async function runExportJob(jobId: string): Promise<void> {
   await prismaWrite.exportJob.update({ where: { id: jobId }, data: { status: 'running' } });
 
   try {
-    fs.mkdirSync(EXPORT_DIR, { recursive: true });
+    const exportDir = getExportDir();
+    fs.mkdirSync(exportDir, { recursive: true });
     const fileName = `${job.exportType}-${jobId}.csv`;
-    const filePath = path.join(EXPORT_DIR, fileName);
-    const fileStream = fs.createWriteStream(filePath);
+    const absPath = path.join(exportDir, fileName);
+    const fileStream = fs.createWriteStream(absPath);
 
     const filters = (job.filters as Record<string, unknown>) ?? {};
     let rowCount: number;
@@ -264,7 +293,7 @@ export async function runExportJob(jobId: string): Promise<void> {
 
     await prismaWrite.exportJob.update({
       where: { id: jobId },
-      data: { status: 'done', filePath, rowCount },
+      data: { status: 'done', filePath: fileName, rowCount },
     });
   } catch (err) {
     await prismaWrite.exportJob.update({

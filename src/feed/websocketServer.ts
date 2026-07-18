@@ -1,6 +1,5 @@
 import WebSocket from 'ws';
 import { IncomingMessage } from 'http';
-import { URLSearchParams } from 'url';
 import { ChannelManager } from '../feed/channelManager';
 import { SubscriptionManager } from '../feed/subscriptionManager';
 import { deliveryService } from '../feed/deliveryService';
@@ -10,7 +9,7 @@ interface WebSocketConnection {
   ws: WebSocket;
   channels: string[];
   filters: any;
-  lastSequence?: bigint;
+  lastSequence?: number;
 }
 
 export class FeedWebSocketServer {
@@ -20,9 +19,9 @@ export class FeedWebSocketServer {
   private heartbeatInterval!: NodeJS.Timeout;
 
   constructor(server: any) {
-    this.wss = new WebSocket.Server({ 
+    this.wss = new WebSocket.Server({
       server,
-      path: '/api/v1/feed/ws'
+      path: '/api/v1/feed/ws',
     });
 
     this.setupWebSocketHandlers();
@@ -34,12 +33,12 @@ export class FeedWebSocketServer {
     this.wss.on('connection', (ws: WebSocket, request: IncomingMessage) => {
       const connectionId = this.generateConnectionId();
       const url = new URL(request.url!, `http://${request.headers.host}`);
-      
+
       // Parse query parameters
       const channels = url.searchParams.get('channels')?.split(',') || [];
       const filtersParam = url.searchParams.get('filters');
       let filters = {};
-      
+
       if (filtersParam) {
         try {
           filters = JSON.parse(filtersParam);
@@ -61,20 +60,22 @@ export class FeedWebSocketServer {
         id: connectionId,
         ws,
         channels,
-        filters
+        filters,
       };
 
       this.connections.set(connectionId, connection);
-      
+
       console.log(`WebSocket connected: ${connectionId}, channels: ${channels.join(', ')}`);
 
       // Send welcome message
-      ws.send(JSON.stringify({
-        type: 'welcome',
-        connectionId,
-        channels,
-        timestamp: new Date().toISOString()
-      }));
+      ws.send(
+        JSON.stringify({
+          type: 'welcome',
+          connectionId,
+          channels,
+          timestamp: new Date().toISOString(),
+        }),
+      );
 
       ws.on('message', (data: WebSocket.RawData) => {
         this.handleMessage(connectionId, data);
@@ -101,7 +102,7 @@ export class FeedWebSocketServer {
     try {
       const message = JSON.parse(data.toString());
       const connection = this.connections.get(connectionId);
-      
+
       if (!connection) return;
 
       switch (message.type) {
@@ -125,7 +126,7 @@ export class FeedWebSocketServer {
 
   private handleSubscribe(connection: WebSocketConnection, message: any) {
     const { channels, filters } = message;
-    
+
     if (channels) {
       for (const channel of channels) {
         if (ChannelManager.isValidChannel(channel) && !connection.channels.includes(channel)) {
@@ -133,80 +134,87 @@ export class FeedWebSocketServer {
         }
       }
     }
-    
+
     if (filters) {
       connection.filters = { ...connection.filters, ...filters };
     }
 
-    connection.ws.send(JSON.stringify({
-      type: 'subscribed',
-      channels: connection.channels,
-      filters: connection.filters,
-      timestamp: new Date().toISOString()
-    }));
+    connection.ws.send(
+      JSON.stringify({
+        type: 'subscribed',
+        channels: connection.channels,
+        filters: connection.filters,
+        timestamp: new Date().toISOString(),
+      }),
+    );
   }
 
   private handleUnsubscribe(connection: WebSocketConnection, message: any) {
     const { channels } = message;
-    
+
     if (channels) {
-      connection.channels = connection.channels.filter(ch => !channels.includes(ch));
+      connection.channels = connection.channels.filter((ch) => !channels.includes(ch));
     }
 
-    connection.ws.send(JSON.stringify({
-      type: 'unsubscribed',
-      channels: connection.channels,
-      timestamp: new Date().toISOString()
-    }));
+    connection.ws.send(
+      JSON.stringify({
+        type: 'unsubscribed',
+        channels: connection.channels,
+        timestamp: new Date().toISOString(),
+      }),
+    );
   }
 
   private async handleReplay(connection: WebSocketConnection, message: any) {
     const { lastSequence } = message;
-    
+
     if (lastSequence) {
       try {
         // Fetch missed messages since lastSequence
-        const missedMessages = await this.getMissedMessages(
-          connection.channels,
-          BigInt(lastSequence)
-        );
+        const missedMessages = await this.getMissedMessages(connection.channels, lastSequence);
 
         for (const msg of missedMessages) {
           if (this.subscriptionManager.matchesFilters(msg.data, connection.filters)) {
-            connection.ws.send(JSON.stringify({
-              type: 'message',
-              channel: msg.channelName,
-              sequence: msg.sequence.toString(),
-              data: msg.data,
-              timestamp: msg.timestamp
-            }));
+            connection.ws.send(
+              JSON.stringify({
+                type: 'message',
+                channel: msg.channelName,
+                sequence: msg.sequence.toString(),
+                data: msg.data,
+                timestamp: msg.timestamp,
+              }),
+            );
           }
         }
 
-        connection.ws.send(JSON.stringify({
-          type: 'replay_complete',
-          replayedCount: missedMessages.length,
-          timestamp: new Date().toISOString()
-        }));
+        connection.ws.send(
+          JSON.stringify({
+            type: 'replay_complete',
+            replayedCount: missedMessages.length,
+            timestamp: new Date().toISOString(),
+          }),
+        );
       } catch (error) {
-        connection.ws.send(JSON.stringify({
-          type: 'error',
-          message: 'Failed to replay messages',
-          timestamp: new Date().toISOString()
-        }));
+        connection.ws.send(
+          JSON.stringify({
+            type: 'error',
+            message: 'Failed to replay messages',
+            timestamp: new Date().toISOString(),
+          }),
+        );
       }
     }
   }
 
-  private async getMissedMessages(channels: string[], lastSequence: bigint) {
-    const { prisma } = await import('../db');
-    return await prisma.feedMessage.findMany({
+  private async getMissedMessages(channels: string[], lastSequence: number) {
+    const { prismaRead } = await import('../db');
+    return await prismaRead.feedMessage.findMany({
       where: {
         channelName: { in: channels },
-        sequence: { gt: lastSequence }
+        sequence: { gt: lastSequence },
       },
       orderBy: { sequence: 'asc' },
-      take: 100 // Limit to prevent overwhelming
+      take: 100, // Limit to prevent overwhelming
     });
   }
 
@@ -218,13 +226,15 @@ export class FeedWebSocketServer {
       }
 
       for (const message of messages) {
-        connection.ws.send(JSON.stringify({
-          type: 'message',
-          channel: message.channelName,
-          sequence: message.sequence.toString(),
-          data: message.data,
-          timestamp: message.timestamp
-        }));
+        connection.ws.send(
+          JSON.stringify({
+            type: 'message',
+            channel: message.channelName,
+            sequence: message.sequence.toString(),
+            data: message.data,
+            timestamp: message.timestamp,
+          }),
+        );
       }
     });
   }
@@ -232,17 +242,19 @@ export class FeedWebSocketServer {
   broadcast(channelName: string, message: any) {
     for (const connection of this.connections.values()) {
       if (
-        connection.channels.includes(channelName) && 
+        connection.channels.includes(channelName) &&
         connection.ws.readyState === WebSocket.OPEN &&
         this.subscriptionManager.matchesFilters(message.data, connection.filters)
       ) {
-        connection.ws.send(JSON.stringify({
-          type: 'message',
-          channel: channelName,
-          sequence: message.sequence?.toString(),
-          data: message.data,
-          timestamp: message.timestamp
-        }));
+        connection.ws.send(
+          JSON.stringify({
+            type: 'message',
+            channel: channelName,
+            sequence: message.sequence?.toString(),
+            data: message.data,
+            timestamp: message.timestamp,
+          }),
+        );
       }
     }
   }
@@ -253,7 +265,7 @@ export class FeedWebSocketServer {
         if (ws.isAlive === false) {
           return ws.terminate();
         }
-        
+
         ws.isAlive = false;
         ws.ping();
       });
@@ -281,11 +293,11 @@ export class FeedWebSocketServer {
   shutdown() {
     clearInterval(this.heartbeatInterval);
     this.wss.close();
-    
+
     for (const connection of this.connections.values()) {
       connection.ws.close();
     }
-    
+
     this.connections.clear();
   }
 }

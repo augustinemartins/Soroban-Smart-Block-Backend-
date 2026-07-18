@@ -8,6 +8,7 @@
 
 import { prismaRead, prismaWrite } from '../db';
 import { logger } from '../logger';
+import { background } from '../utils/background';
 
 const POLL_INTERVAL_MS = 2500; // every ~1 block
 const DEVIATION_THRESHOLDS = [0.1, 0.5, 1.0, 2.0]; // percent
@@ -79,16 +80,16 @@ async function pollPools() {
           poolId: pool.id,
           blockNumber,
           timestamp: now,
-          reserveA,
-          reserveB,
+          reserveA: reserveA.toString(),
+          reserveB: reserveB.toString(),
           spotPrice,
           twap1m: twap(pool.id, 60_000) ?? spotPrice,
           twap5m: twap(pool.id, 300_000) ?? spotPrice,
           twap1h: twap(pool.id, 3_600_000) ?? spotPrice,
         },
         update: {
-          reserveA,
-          reserveB,
+          reserveA: reserveA.toString(),
+          reserveB: reserveB.toString(),
           spotPrice,
           twap1m: twap(pool.id, 60_000) ?? spotPrice,
           twap5m: twap(pool.id, 300_000) ?? spotPrice,
@@ -137,24 +138,28 @@ async function computePriceDeviations(
       for (let j = i + 1; j < prices.length; j++) {
         const pA = prices[i];
         const pB = prices[j];
-        const deviation = Math.abs(pA.price - pB.price) / Math.min(pA.price, pB.price) * 100;
+        const deviation = (Math.abs(pA.price - pB.price) / Math.min(pA.price, pB.price)) * 100;
 
         // Only record if above smallest threshold
         if (deviation < DEVIATION_THRESHOLDS[0]) continue;
 
-        await prismaWrite.priceDeviation.create({
-          data: {
-            tokenA,
-            tokenB,
-            poolIdA: pA.poolId,
-            poolIdB: pB.poolId,
-            priceA: pA.price,
-            priceB: pB.price,
-            deviationPercentage: deviation,
-            timestamp: now,
-            blockNumber,
-          },
-        }).catch(() => {}); // ignore unique constraint races
+        background('poolPrice.priceDeviation', () =>
+          prismaWrite.priceDeviation
+            .create({
+              data: {
+                tokenA,
+                tokenB,
+                poolIdA: pA.poolId,
+                poolIdB: pB.poolId,
+                priceA: pA.price,
+                priceB: pB.price,
+                deviationPercentage: deviation,
+                timestamp: now,
+                blockNumber,
+              },
+            })
+            .then(() => {}),
+        );
       }
     }
   }
@@ -175,5 +180,5 @@ export function startPoolPriceMonitor() {
   }, POLL_INTERVAL_MS);
 
   // Initial poll
-  pollPools().catch(() => {});
+  background('poolPrice.initialPoll', () => pollPools().then(() => {}));
 }

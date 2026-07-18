@@ -1,36 +1,38 @@
-import '../config'; // load dotenv
+import '../config';
 import { prismaWrite as prisma } from '../db';
-import { runIndexer } from './indexer';
+import { indexSingleLedger, runIndexer, stopIndexerService } from './indexer';
 import { scheduleReconciliation } from './reconciliation';
 import { startProtocolMonitor } from './protocol-guard';
 import { schedulePruner } from './dataPruner';
-import { initWhaleWatcher } from './whaleWatcher';
-import { startMicroBlockPoller } from './microBlockPoller';
-import { scheduleSettlementCompactor } from './settlement-compactor';
+import { startP2pNode, stopP2pNode, wireOnTheFlyIndexer } from '../p2p';
 
 async function main() {
   await prisma.$connect();
 
-  // #51: Start protocol version monitor (checks every 10 min, warns on upgrades)
+  wireOnTheFlyIndexer(indexSingleLedger);
+  await startP2pNode();
+
   startProtocolMonitor();
-
-  // #50: Schedule daily reconciliation audit
   scheduleReconciliation();
-
-  // #135: Schedule transient state data pruner
   schedulePruner();
-
-  // #136: Initialize whale transaction watcher
-  initWhaleWatcher();
-
-  // #192: Start micro-block polling for 2.5 s block close time notifications
-  startMicroBlockPoller();
-
-  // #220: Schedule batch-settlement event compactor
-  scheduleSettlementCompactor();
 
   await runIndexer();
 }
+
+let shuttingDown = false;
+
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[indexer] received ${signal}, shutting down...`);
+  stopIndexerService();
+  await stopP2pNode().catch((err) => console.error('[indexer] error stopping p2p node:', err));
+  await prisma.$disconnect().catch(() => undefined);
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));
 
 main().catch((e) => {
   console.error(e);

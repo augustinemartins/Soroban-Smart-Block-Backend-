@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { prisma } from '../db';
+import { prismaWrite as prisma } from '../db';
 
 export interface FeedMessage {
   channelName: string;
@@ -9,13 +9,13 @@ export interface FeedMessage {
 }
 
 class FeedPublisher extends EventEmitter {
-  private sequenceCounter = BigInt(0);
+  private sequenceCounter = 0;
 
   async publish(message: FeedMessage) {
     try {
       // Increment global sequence counter
       this.sequenceCounter++;
-      
+
       // Store message in database for persistence
       const storedMessage = await prisma.feedMessage.create({
         data: {
@@ -24,15 +24,15 @@ class FeedPublisher extends EventEmitter {
           data: message.data,
           ledgerSequence: message.ledgerSequence,
           timestamp: message.timestamp,
-          indexedAt: new Date()
-        }
+          indexedAt: new Date(),
+        },
       });
 
       // Emit to real-time subscribers
       this.emit('message', {
         ...message,
         sequence: this.sequenceCounter,
-        indexedAt: storedMessage.indexedAt
+        indexedAt: storedMessage.indexedAt,
       });
 
       return storedMessage;
@@ -42,18 +42,18 @@ class FeedPublisher extends EventEmitter {
     }
   }
 
-  async getLastSequence(): Promise<bigint> {
+  async getLastSequence(): Promise<number> {
     const lastMessage = await prisma.feedMessage.findFirst({
       orderBy: { sequence: 'desc' },
-      select: { sequence: true }
+      select: { sequence: true },
     });
-    
+
     if (lastMessage) {
       this.sequenceCounter = lastMessage.sequence;
       return lastMessage.sequence;
     }
-    
-    return BigInt(0);
+
+    return 0;
   }
 
   async initializeSequence() {
