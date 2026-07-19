@@ -1,6 +1,17 @@
 import { prismaWrite, prismaRead } from '../db';
-import { TransactionFeatures, FraudModelType, ModelDeploymentStatus, ModelDriftReport, FraudSeverity } from '../types/fraud';
-import { LstmAnomalyDetector, GnnClusterDetector, XgboostWashTradingClassifier, ExploitPredictor, InferenceResult } from '../predictive/fraud-models';
+import {
+  TransactionFeatures,
+  FraudModelType,
+  ModelDriftReport,
+  FraudSeverity,
+} from '../types/fraud';
+import {
+  LstmAnomalyDetector,
+  GnnClusterDetector,
+  XgboostWashTradingClassifier,
+  ExploitPredictor,
+  InferenceResult,
+} from '../predictive/fraud-models';
 import { logger } from '../logger';
 
 export class MlopsService {
@@ -20,7 +31,7 @@ export class MlopsService {
   private MAX_BATCH_SIZE = 64;
 
   constructor() {
-    this.initializeRegistry().catch(err => {
+    this.initializeRegistry().catch((err) => {
       logger.error('Failed to initialize model registry', { err });
     });
   }
@@ -38,33 +49,57 @@ export class MlopsService {
         type: 'LSTM',
         version: '1.0.0',
         status: 'ACTIVE',
-        metrics: { accuracy: 0.965, precision: 0.958, recall: 0.951, f1Score: 0.954, inferenceTimeMs: 15 },
-        parameters: { normalThreshold: 0.65, windowSize: 100 }
+        metrics: {
+          accuracy: 0.965,
+          precision: 0.958,
+          recall: 0.951,
+          f1Score: 0.954,
+          inferenceTimeMs: 15,
+        },
+        parameters: { normalThreshold: 0.65, windowSize: 100 },
       },
       {
         name: 'GraphSAGE-Sybil-GNN',
         type: 'GNN',
         version: '1.0.0',
         status: 'SHADOW',
-        metrics: { accuracy: 0.942, precision: 0.931, recall: 0.925, f1Score: 0.928, inferenceTimeMs: 28 },
-        parameters: { embeddingDim: 128, layerCount: 2 }
+        metrics: {
+          accuracy: 0.942,
+          precision: 0.931,
+          recall: 0.925,
+          f1Score: 0.928,
+          inferenceTimeMs: 28,
+        },
+        parameters: { embeddingDim: 128, layerCount: 2 },
       },
       {
         name: 'XGBoost-WashTrading',
         type: 'XGBoost',
         version: '1.1.0',
         status: 'ACTIVE',
-        metrics: { accuracy: 0.978, precision: 0.972, recall: 0.968, f1Score: 0.970, inferenceTimeMs: 8 },
-        parameters: { maxDepth: 6, learningRate: 0.05 }
+        metrics: {
+          accuracy: 0.978,
+          precision: 0.972,
+          recall: 0.968,
+          f1Score: 0.97,
+          inferenceTimeMs: 8,
+        },
+        parameters: { maxDepth: 6, learningRate: 0.05 },
       },
       {
         name: 'LLM-Bytecode-Exploit',
         type: 'LLM_Embedding',
         version: '1.0.0',
         status: 'ACTIVE',
-        metrics: { accuracy: 0.952, precision: 0.945, recall: 0.961, f1Score: 0.953, inferenceTimeMs: 45 },
-        parameters: { embeddingThreshold: 0.82 }
-      }
+        metrics: {
+          accuracy: 0.952,
+          precision: 0.945,
+          recall: 0.961,
+          f1Score: 0.953,
+          inferenceTimeMs: 45,
+        },
+        parameters: { embeddingThreshold: 0.82 },
+      },
     ];
 
     for (const model of defaultModels) {
@@ -75,8 +110,8 @@ export class MlopsService {
           version: model.version,
           status: model.status,
           metrics: model.metrics,
-          parameters: model.parameters
-        }
+          parameters: model.parameters,
+        },
       });
     }
     logger.info('Model registry initialized with default models');
@@ -85,7 +120,10 @@ export class MlopsService {
   /**
    * Triton-style batched inference to achieve sub-50ms p99 latency with GPU-like acceleration simulation
    */
-  async runBatchedInference(features: TransactionFeatures, modelType: FraudModelType): Promise<InferenceResult> {
+  async runBatchedInference(
+    features: TransactionFeatures,
+    modelType: FraudModelType,
+  ): Promise<InferenceResult> {
     return new Promise((resolve, reject) => {
       this.inferenceBatchBuffer.push({ features, resolve, reject });
 
@@ -152,17 +190,25 @@ export class MlopsService {
   async scoreTransaction(features: TransactionFeatures): Promise<{
     activeScore: number;
     activeSeverity: FraudSeverity;
-    activeExplanation: { baseReason: string; shapValues: Record<string, number>; limeExplanation: string };
+    activeExplanation: {
+      baseReason: string;
+      shapValues: Record<string, number>;
+      limeExplanation: string;
+    };
     shadowScores: Record<string, number>;
   }> {
     const registeredModels = await prismaRead.modelRegistryEntry.findMany();
-    const activeModels = registeredModels.filter(m => m.status === 'ACTIVE');
-    const shadowModels = registeredModels.filter(m => m.status === 'SHADOW');
+    const activeModels = registeredModels.filter((m) => m.status === 'ACTIVE');
+    const shadowModels = registeredModels.filter((m) => m.status === 'SHADOW');
 
     // Run active models scoring
     let highestActiveScore = 0;
     let activeSeverity: FraudSeverity = 'LOW';
-    let explanation = { baseReason: '', shapValues: {} as Record<string, number>, limeExplanation: '' };
+    let explanation = {
+      baseReason: '',
+      shapValues: {} as Record<string, number>,
+      limeExplanation: '',
+    };
 
     for (const model of activeModels) {
       const result = await this.runBatchedInference(features, model.type as FraudModelType);
@@ -172,7 +218,7 @@ export class MlopsService {
         explanation = {
           baseReason: `Identified by active model ${model.name} (v${model.version})`,
           shapValues: result.shapValues,
-          limeExplanation: result.limeExplanation
+          limeExplanation: result.limeExplanation,
         };
       }
     }
@@ -183,10 +229,12 @@ export class MlopsService {
       try {
         const result = await this.runBatchedInference(features, model.type as FraudModelType);
         shadowScores[model.name] = result.riskScore;
-        
+
         // Log shadow scoring comparison
         if (Math.abs(result.riskScore - highestActiveScore) > 30) {
-          logger.info(`[Shadow Scoring Deviation] Model ${model.name} scored ${result.riskScore} vs Active highest ${highestActiveScore}`);
+          logger.info(
+            `[Shadow Scoring Deviation] Model ${model.name} scored ${result.riskScore} vs Active highest ${highestActiveScore}`,
+          );
         }
       } catch (err) {
         logger.error(`Shadow scoring failed for ${model.name}`, { err });
@@ -197,29 +245,37 @@ export class MlopsService {
       activeScore: highestActiveScore,
       activeSeverity,
       activeExplanation: explanation,
-      shadowScores
+      shadowScores,
     };
   }
 
   /**
    * Feedback Loop: confirmed attacks added to retraining set
    */
-  async confirmAttackFeedback(transactionHash: string, label: 'MEV' | 'WASH_TRADING' | 'SYBIL' | 'SMART_CONTRACT_EXPLOIT'): Promise<void> {
+  async confirmAttackFeedback(
+    transactionHash: string,
+    label: 'MEV' | 'WASH_TRADING' | 'SYBIL' | 'SMART_CONTRACT_EXPLOIT',
+  ): Promise<void> {
     logger.info(`Received attack feedback for transaction ${transactionHash}. Label: ${label}`);
-    
+
     // Save/update in database or a files list
     await prismaWrite.fraudAlert.updateMany({
       where: { transactionHash },
-      data: { mitigationApplied: true }
+      data: { mitigationApplied: true },
     });
 
     // Extract features for this training point
     const tx = await prismaRead.transaction.findFirst({ where: { hash: transactionHash } });
     if (tx) {
       // Trigger automated retraining pipeline if new confirmed attacks threshold is met
-      const confirmedCount = await prismaRead.fraudAlert.count({ where: { mitigationApplied: true } });
-      if (confirmedCount > 0 && confirmedCount % 5 === 0) { // Every 5 confirmed attacks, retrain
-        logger.info(`Confirmed attacks count reached ${confirmedCount}. Triggering automated retraining pipeline.`);
+      const confirmedCount = await prismaRead.fraudAlert.count({
+        where: { mitigationApplied: true },
+      });
+      if (confirmedCount > 0 && confirmedCount % 5 === 0) {
+        // Every 5 confirmed attacks, retrain
+        logger.info(
+          `Confirmed attacks count reached ${confirmedCount}. Triggering automated retraining pipeline.`,
+        );
         void this.runAutomatedRetraining();
       }
     }
@@ -236,7 +292,7 @@ export class MlopsService {
     // Simulate drift checks by loading recent features from FeatureStoreEntry
     const recentEntries = await prismaRead.featureStoreEntry.findMany({
       take: 200,
-      orderBy: { updatedAt: 'desc' }
+      orderBy: { updatedAt: 'desc' },
     });
 
     if (recentEntries.length < 50) {
@@ -247,9 +303,24 @@ export class MlopsService {
     for (const model of registeredModels) {
       // Population Stability Index (PSI) simulation
       const featureDrifts = [
-        { featureName: 'gasPriceDeviation', psi: Math.random() * 0.3, ksStatistic: Math.random() * 0.1, driftDetected: false },
-        { featureName: 'contractCallDepth', psi: Math.random() * 0.15, ksStatistic: Math.random() * 0.05, driftDetected: false },
-        { featureName: 'pageRank', psi: Math.random() * 0.4, ksStatistic: Math.random() * 0.18, driftDetected: false }
+        {
+          featureName: 'gasPriceDeviation',
+          psi: Math.random() * 0.3,
+          ksStatistic: Math.random() * 0.1,
+          driftDetected: false,
+        },
+        {
+          featureName: 'contractCallDepth',
+          psi: Math.random() * 0.15,
+          ksStatistic: Math.random() * 0.05,
+          driftDetected: false,
+        },
+        {
+          featureName: 'pageRank',
+          psi: Math.random() * 0.4,
+          ksStatistic: Math.random() * 0.18,
+          driftDetected: false,
+        },
       ];
 
       // Mark drift as detected if PSI > 0.25
@@ -259,7 +330,7 @@ export class MlopsService {
         }
       }
 
-      const driftThresholdExceeded = featureDrifts.some(fd => fd.driftDetected);
+      const driftThresholdExceeded = featureDrifts.some((fd) => fd.driftDetected);
       const predictionDrift = Math.random() * 0.12;
 
       const report: ModelDriftReport = {
@@ -267,7 +338,7 @@ export class MlopsService {
         timestamp: new Date(),
         featureDrifts,
         predictionDrift,
-        driftThresholdExceeded
+        driftThresholdExceeded,
       };
 
       // Save drift metrics to DB
@@ -276,14 +347,16 @@ export class MlopsService {
           modelId: model.id,
           featureDrifts: featureDrifts as any,
           predictionDrift,
-          driftThresholdExceeded
-        }
+          driftThresholdExceeded,
+        },
       });
 
       reports.push(report);
 
       if (driftThresholdExceeded) {
-        logger.warn(`Model Drift Detected on model ${model.name} (ID: ${model.id})! Triggering automatic retrain.`);
+        logger.warn(
+          `Model Drift Detected on model ${model.name} (ID: ${model.id})! Triggering automatic retrain.`,
+        );
         void this.retrainModel(model.id);
       }
     }
@@ -299,10 +372,10 @@ export class MlopsService {
     if (!model) return;
 
     logger.info(`Starting automated model retraining for ${model.name}`);
-    
+
     // Simulate loading training data from FeatureStoreEntry
     const featureEntries = await prismaRead.featureStoreEntry.findMany({ take: 500 });
-    const trainingData: TransactionFeatures[] = featureEntries.map(e => e.features as any);
+    const trainingData: TransactionFeatures[] = featureEntries.map((e) => e.features as any);
 
     try {
       // Retrain the specific model class
@@ -322,15 +395,15 @@ export class MlopsService {
         precision: Math.min(0.99, model.metrics ? (model.metrics as any).precision + 0.003 : 0.95),
         recall: Math.min(0.99, model.metrics ? (model.metrics as any).recall + 0.006 : 0.95),
         f1Score: Math.min(0.99, model.metrics ? (model.metrics as any).f1Score + 0.004 : 0.95),
-        inferenceTimeMs: model.metrics ? (model.metrics as any).inferenceTimeMs : 15
+        inferenceTimeMs: model.metrics ? (model.metrics as any).inferenceTimeMs : 15,
       };
 
       await prismaWrite.modelRegistryEntry.update({
         where: { id: modelId },
         data: {
           metrics: updatedMetrics,
-          updatedAt: new Date()
-        }
+          updatedAt: new Date(),
+        },
       });
 
       // Log retraining result
@@ -341,8 +414,8 @@ export class MlopsService {
           datasetSize: trainingData.length || 100,
           accuracyAfter: updatedMetrics.accuracy,
           precisionAfter: updatedMetrics.precision,
-          recallAfter: updatedMetrics.recall
-        }
+          recallAfter: updatedMetrics.recall,
+        },
       });
 
       logger.info(`Automated retraining completed successfully for ${model.name}`);
@@ -355,8 +428,8 @@ export class MlopsService {
           datasetSize: trainingData.length,
           accuracyAfter: 0,
           precisionAfter: 0,
-          recallAfter: 0
-        }
+          recallAfter: 0,
+        },
       });
     }
   }

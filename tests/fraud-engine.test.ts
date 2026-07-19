@@ -1,8 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { getFraudFeatureStore } from '../src/services/fraudFeatureStore';
 import { getMlopsService } from '../src/services/mlops';
 import { getFraudAlertSystem } from '../src/services/fraudAlertSystem';
-import { LstmAnomalyDetector, GnnClusterDetector, XgboostWashTradingClassifier, ExploitPredictor } from '../src/predictive/fraud-models';
+import {
+  LstmAnomalyDetector,
+  GnnClusterDetector,
+  XgboostWashTradingClassifier,
+  ExploitPredictor,
+} from '../src/predictive/fraud-models';
 
 // Mock DB clients so tests run locally without Postgres connection
 vi.mock('../src/db', () => {
@@ -17,33 +22,65 @@ vi.mock('../src/db', () => {
           ledgerCloseTime: new Date(),
           feeCharged: '150',
           sorobanResources: { footprint: { readOnly: ['k1', 'k2'], readWrite: ['k3'] } },
-          events: [{}, {}]
+          events: [{}, {}],
         }),
         findMany: vi.fn().mockResolvedValue([
           { feeCharged: '120', ledgerSequence: 998, ledgerCloseTime: new Date(Date.now() - 5000) },
-          { feeCharged: '130', ledgerSequence: 999, ledgerCloseTime: new Date(Date.now() - 1000) }
+          { feeCharged: '130', ledgerSequence: 999, ledgerCloseTime: new Date(Date.now() - 1000) },
         ]),
-        count: vi.fn().mockResolvedValue(2)
+        count: vi.fn().mockResolvedValue(2),
       },
       event: {
-        count: vi.fn().mockResolvedValue(5)
+        count: vi.fn().mockResolvedValue(5),
       },
       callGraphVertex: {
-        findMany: vi.fn().mockResolvedValue([{ depth: 3, preStateReads: ['r1'], postStateWrites: ['w1'] }])
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ depth: 3, preStateReads: ['r1'], postStateWrites: ['w1'] }]),
       },
       tokenPrice: {
-        findUnique: vi.fn().mockResolvedValue({ tokenAddress: 'CCONTRACT_TEST_ADDRESS', priceChange24h: 2.5 })
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ tokenAddress: 'CCONTRACT_TEST_ADDRESS', priceChange24h: 2.5 }),
       },
       dexPool: {
-        findFirst: vi.fn().mockResolvedValue({ token0Address: 'CCONTRACT_TEST_ADDRESS', totalValueAtRisk: 1000000 })
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({
+            token0Address: 'CCONTRACT_TEST_ADDRESS',
+            totalValueAtRisk: 1000000,
+          }),
       },
       modelRegistryEntry: {
         count: vi.fn().mockResolvedValue(4),
         findMany: vi.fn().mockResolvedValue([
-          { id: 'm-1', name: 'LSTM-Autoencoder-Anomaly', type: 'LSTM', version: '1.0.0', status: 'ACTIVE', metrics: { accuracy: 0.95 } },
-          { id: 'm-2', name: 'GraphSAGE-Sybil-GNN', type: 'GNN', version: '1.0.0', status: 'SHADOW', metrics: { accuracy: 0.93 } }
+          {
+            id: 'm-1',
+            name: 'LSTM-Autoencoder-Anomaly',
+            type: 'LSTM',
+            version: '1.0.0',
+            status: 'ACTIVE',
+            metrics: { accuracy: 0.95 },
+          },
+          {
+            id: 'm-2',
+            name: 'GraphSAGE-Sybil-GNN',
+            type: 'GNN',
+            version: '1.0.0',
+            status: 'SHADOW',
+            metrics: { accuracy: 0.93 },
+          },
         ]),
-        findUnique: vi.fn().mockResolvedValue({ id: 'm-1', name: 'LSTM-Autoencoder-Anomaly', type: 'LSTM', version: '1.0.0', status: 'ACTIVE', metrics: { accuracy: 0.95 } })
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({
+            id: 'm-1',
+            name: 'LSTM-Autoencoder-Anomaly',
+            type: 'LSTM',
+            version: '1.0.0',
+            status: 'ACTIVE',
+            metrics: { accuracy: 0.95 },
+          }),
       },
       featureStoreEntry: {
         findMany: vi.fn().mockResolvedValue(
@@ -53,52 +90,54 @@ vi.mock('../src/db', () => {
               gasPriceDeviation: 0.1,
               contractCallDepth: 1,
               pageRank: 0.15,
-              storageAccessPatterns: { reads: 1, writes: 0 }
-            }
-          })
-        )
+              storageAccessPatterns: { reads: 1, writes: 0 },
+            },
+          }),
+        ),
       },
       indexerState: {
-        findUnique: vi.fn().mockResolvedValue({ lastLedger: 1005 })
+        findUnique: vi.fn().mockResolvedValue({ lastLedger: 1005 }),
       },
       fraudAlert: {
-        count: vi.fn().mockResolvedValue(1)
-      }
+        count: vi.fn().mockResolvedValue(1),
+      },
     },
     prismaWrite: {
       fraudAlert: {
-        create: vi.fn().mockImplementation((args) => Promise.resolve({ id: 'alert_id_123', ...args.data })),
+        create: vi
+          .fn()
+          .mockImplementation((args) => Promise.resolve({ id: 'alert_id_123', ...args.data })),
         update: vi.fn().mockResolvedValue({}),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 })
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       featureStoreEntry: {
-        upsert: vi.fn().mockResolvedValue({})
+        upsert: vi.fn().mockResolvedValue({}),
       },
       modelRegistryEntry: {
         create: vi.fn().mockResolvedValue({}),
         findMany: vi.fn().mockResolvedValue([]),
         count: vi.fn().mockResolvedValue(0),
-        update: vi.fn().mockResolvedValue({})
+        update: vi.fn().mockResolvedValue({}),
       },
       modelDriftMetrics: {
-        create: vi.fn().mockResolvedValue({})
+        create: vi.fn().mockResolvedValue({}),
       },
       fraudRetrainingLog: {
-        create: vi.fn().mockResolvedValue({})
+        create: vi.fn().mockResolvedValue({}),
       },
       frozenLedgerKey: {
-        upsert: vi.fn().mockResolvedValue({})
+        upsert: vi.fn().mockResolvedValue({}),
       },
       auditLog: {
-        create: vi.fn().mockResolvedValue({})
+        create: vi.fn().mockResolvedValue({}),
       },
       emergencyState: {
-        upsert: vi.fn().mockResolvedValue({})
+        upsert: vi.fn().mockResolvedValue({}),
       },
       incidentReport: {
-        create: vi.fn().mockResolvedValue({})
-      }
-    }
+        create: vi.fn().mockResolvedValue({}),
+      },
+    },
   };
 });
 
@@ -119,7 +158,6 @@ describe('Fraud Feature Store', () => {
     expect(features.storageAccessPatterns.reads).toBe(2); // from callGraphVertex (fallback)
     expect(features.eventEmitFrequency).toBe(5); // from mock event count
   });
-
 
   it('should retrieve online features caching correctly', async () => {
     const store = getFraudFeatureStore();
@@ -144,7 +182,7 @@ describe('Fraud Model Zoo', () => {
     communityId: 4,
     priceCorrelation: -0.9,
     socialSentiment: -0.85,
-    dexLiquidityChange: 4.2
+    dexLiquidityChange: 4.2,
   };
 
   it('LSTM Anomaly Detector detects gas price and inter-arrival time anomalies', async () => {

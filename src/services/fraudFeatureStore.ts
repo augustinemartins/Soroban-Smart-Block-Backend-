@@ -27,9 +27,11 @@ export class FraudFeatureStore {
    * Serves offline historical features with point-in-time correctness for ML training
    */
   async getOfflineFeatures(entityIds: string[], timestamp: Date): Promise<TransactionFeatures[]> {
-    logger.info(`Extracting offline features for ${entityIds.length} entities as of ${timestamp.toISOString()}`);
+    logger.info(
+      `Extracting offline features for ${entityIds.length} entities as of ${timestamp.toISOString()}`,
+    );
     const results: TransactionFeatures[] = [];
-    
+
     for (const entityId of entityIds) {
       try {
         const features = await this.extractFeaturesForEntity(entityId, timestamp);
@@ -40,7 +42,7 @@ export class FraudFeatureStore {
         results.push(this.getDefaultFeatures());
       }
     }
-    
+
     return results;
   }
 
@@ -50,21 +52,18 @@ export class FraudFeatureStore {
    */
   async extractFeaturesForEntity(entityId: string, asOfTime?: Date): Promise<TransactionFeatures> {
     const cutoff = asOfTime || new Date();
-    
+
     try {
       // 1. Fetch transaction details if entityId is a transaction hash
       const tx = await prismaRead.transaction.findFirst({
         where: {
-          OR: [
-            { hash: entityId },
-            { sourceAccount: entityId }
-          ],
-          ledgerCloseTime: { lte: cutoff }
+          OR: [{ hash: entityId }, { sourceAccount: entityId }],
+          ledgerCloseTime: { lte: cutoff },
         },
         orderBy: { ledgerCloseTime: 'desc' },
         include: {
-          events: true
-        }
+          events: true,
+        },
       });
 
       if (!tx) {
@@ -77,29 +76,31 @@ export class FraudFeatureStore {
 
       // 2. Transaction-level features
       const feeVal = tx.feeCharged ? parseFloat(tx.feeCharged) : 100;
-      
+
       // Calculate Gas (Fee) Price Deviation
       const recentTxs = await prismaRead.transaction.findMany({
         where: {
-          ledgerCloseTime: { lte: tx.ledgerCloseTime }
+          ledgerCloseTime: { lte: tx.ledgerCloseTime },
         },
         orderBy: { ledgerCloseTime: 'desc' },
         take: 100,
-        select: { feeCharged: true }
+        select: { feeCharged: true },
       });
-      const avgFee = recentTxs.length > 0 
-        ? recentTxs.reduce((sum, t) => sum + (t.feeCharged ? parseFloat(t.feeCharged) : 100), 0) / recentTxs.length 
-        : 100;
+      const avgFee =
+        recentTxs.length > 0
+          ? recentTxs.reduce((sum, t) => sum + (t.feeCharged ? parseFloat(t.feeCharged) : 100), 0) /
+            recentTxs.length
+          : 100;
       const gasPriceDeviation = avgFee > 0 ? (feeVal - avgFee) / avgFee : 0;
 
       // Calculate Call Depth
       let contractCallDepth = 1;
       try {
         const callGraphVertices = await prismaRead.callGraphVertex.findMany({
-          where: { txHash }
+          where: { txHash },
         });
         if (callGraphVertices.length > 0) {
-          contractCallDepth = Math.max(...callGraphVertices.map(v => v.depth), 1);
+          contractCallDepth = Math.max(...callGraphVertices.map((v) => v.depth), 1);
         }
       } catch {
         // Fallback if callGraphVertex table is empty/not updated
@@ -112,21 +113,28 @@ export class FraudFeatureStore {
       if (tx.sorobanResources && typeof tx.sorobanResources === 'object') {
         const resources = tx.sorobanResources as any;
         if (resources.footprint) {
-          reads = Array.isArray(resources.footprint.readOnly) ? resources.footprint.readOnly.length : 0;
-          writes = Array.isArray(resources.footprint.readWrite) ? resources.footprint.readWrite.length : 0;
+          reads = Array.isArray(resources.footprint.readOnly)
+            ? resources.footprint.readOnly.length
+            : 0;
+          writes = Array.isArray(resources.footprint.readWrite)
+            ? resources.footprint.readWrite.length
+            : 0;
         }
       }
       // If footprint is empty, inspect preStateReads/postStateWrites
       if (reads === 0 && writes === 0) {
         try {
           const vertices = await prismaRead.callGraphVertex.findMany({
-            where: { txHash }
+            where: { txHash },
           });
           for (const v of vertices) {
             if (v.preStateReads && Array.isArray(v.preStateReads)) reads += v.preStateReads.length;
-            if (v.postStateWrites && Array.isArray(v.postStateWrites)) writes += v.postStateWrites.length;
+            if (v.postStateWrites && Array.isArray(v.postStateWrites))
+              writes += v.postStateWrites.length;
           }
-        } catch {}
+        } catch {
+          // Fallback if callGraphVertex lookup fails
+        }
       }
 
       // Event Emit Frequency
@@ -137,9 +145,9 @@ export class FraudFeatureStore {
             contractAddress: contract,
             ledgerCloseTime: {
               lte: tx.ledgerCloseTime,
-              gte: new Date(tx.ledgerCloseTime.getTime() - 10 * 60 * 1000) // 10 min window
-            }
-          }
+              gte: new Date(tx.ledgerCloseTime.getTime() - 10 * 60 * 1000), // 10 min window
+            },
+          },
         });
         eventEmitFrequency = recentEventsCount;
       }
@@ -148,10 +156,10 @@ export class FraudFeatureStore {
       const rollingTxs = await prismaRead.transaction.findMany({
         where: {
           sourceAccount: account,
-          ledgerCloseTime: { lte: tx.ledgerCloseTime }
+          ledgerCloseTime: { lte: tx.ledgerCloseTime },
         },
         orderBy: { ledgerCloseTime: 'desc' },
-        take: 100
+        take: 100,
       });
 
       const rollingTxCount = rollingTxs.length;
@@ -169,7 +177,7 @@ export class FraudFeatureStore {
       let pageRank = 0.15;
       let betweennessCentrality = 0.05;
       let communityId = 1;
-      
+
       try {
         const targetForGraph = contract || account;
         if (targetForGraph) {
@@ -189,13 +197,15 @@ export class FraudFeatureStore {
       try {
         if (contract) {
           const priceRecord = await prismaRead.tokenPrice.findUnique({
-            where: { tokenAddress: contract }
+            where: { tokenAddress: contract },
           });
           if (priceRecord) {
             priceCorrelation = Number(priceRecord.priceChange24h || 0) / 100.0;
           }
         }
-      } catch {}
+      } catch {
+        // Fallback if tokenPrice lookup fails
+      }
 
       // Social Sentiment (external API simulation - returns sentiment from -1.0 to 1.0)
       const socialSentiment = this.getSocialSentimentMock(contract || account);
@@ -206,17 +216,16 @@ export class FraudFeatureStore {
         if (contract) {
           const pool = await prismaRead.dexPool.findFirst({
             where: {
-              OR: [
-                { tokenA: contract },
-                { tokenB: contract }
-              ]
-            }
+              OR: [{ tokenA: contract }, { tokenB: contract }],
+            },
           });
           if (pool && pool.tvlUsd) {
             dexLiquidityChange = Number(pool.tvlUsd) / 1000000.0; // scaled liquidity metric
           }
         }
-      } catch {}
+      } catch {
+        // Fallback if dexPool lookup fails
+      }
 
       return {
         gasPriceDeviation,
@@ -232,7 +241,7 @@ export class FraudFeatureStore {
         communityId,
         priceCorrelation,
         socialSentiment,
-        dexLiquidityChange
+        dexLiquidityChange,
       };
     } catch (e) {
       logger.error('Error extracting features', { entityId, error: e });
@@ -265,7 +274,7 @@ export class FraudFeatureStore {
       communityId: 1,
       priceCorrelation: 0.0,
       socialSentiment: 0.1,
-      dexLiquidityChange: 0.0
+      dexLiquidityChange: 0.0,
     };
   }
 }
