@@ -22,61 +22,6 @@ model Ledger {
   @@index([closeTime])
 }
 
-model Contract {
-  id                 String  @id @default(cuid())
-  address            String  @unique
-  name               String?
-  description        String?
-  abi                Json?
-  functionSignatures Json?
-  isToken            Boolean @default(false)
-  tokenSymbol        String?
-  tokenName          String?
-  tokenDecimals      Int?
-  wasmHash           String?
-  isVerified         Boolean @default(false)
-
-  transactions Transaction[]
-  events       Event[]
-  wasmUpgrades WasmUpgradeHistory[]
-  auditCerts   AuditCertificate[]
-  verificationBadge  String? // gold | silver | bronze | null
-  lastVerifiedAt     DateTime?
-  safetyScore        Int?
-  verifiedProperties Int       @default(0)
-  totalProperties    Int       @default(0)
-  vulnerabilities    Json?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  transactions     Transaction[]
-  events           Event[]
-  wasmUpgrades     WasmUpgradeHistory[]
-  verificationRuns VerificationRun[]
-
-  @@index([address])
-  @@index([verificationBadge])
-  @@index([safetyScore])
-}
-
-model VerificationRun {
-  id              String    @id @default(cuid())
-  contractAddress String
-  contract        Contract  @relation(fields: [contractAddress], references: [address])
-  status          String    @default("pending") // pending | running | completed | failed
-  badge           String? // gold | silver | bronze
-  safetyScore     Int?
-  report          Json?
-  startedAt       DateTime  @default(now())
-  completedAt     DateTime?
-  createdAt       DateTime  @default(now())
-
-  @@index([contractAddress])
-  @@index([status])
-  @@index([safetyScore])
-}
-
 model WasmUpgradeHistory {
   id              String   @id @default(cuid())
   contractAddress String
@@ -185,6 +130,142 @@ model EventDefinition {
   @@index([contractAddress])
 }
 
+model AuditCertificate {
+  id               String   @id @default(cuid())
+  contractAddress  String
+  version          Int      @default(1)
+  status           String   // "draft" | "published" | "superseded" | "revoked"
+  generatedAt      DateTime
+  expiresAt        DateTime?
+  overallScore     Int
+  securityScore    Int
+  governanceScore  Int
+  economicScore    Int
+  complianceScore  Int
+  liquidityScore   Int
+  signatureAlgorithm String
+  signature          String
+  publicKey          String
+  certificateHash    String
+  anchorTxHash       String?
+  totalFindings    Int      @default(0)
+  openFindings     Int      @default(0)
+  criticalFindings Int      @default(0)
+  highFindings     Int      @default(0)
+  mediumFindings   Int      @default(0)
+  lowFindings      Int      @default(0)
+  resolvedFindings Int      @default(0)
+  findings         Json
+  scores           Json
+  metadata         Json?
+  createdAt        DateTime @default(now())
+
+  auditFindings AuditFinding[]
+  auditEvents   AuditEvent[]
+  contract      Contract? @relation(fields: [contractAddress], references: [address])
+
+  @@unique([contractAddress, version])
+  @@index([contractAddress, status])
+  @@index([overallScore(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+}
+
+model AuditFinding {
+  id            String   @id @default(cuid())
+  certificateId String
+  category      String
+  severity      String
+  title         String
+  description   String
+  detail        String?
+  recommendation String?
+  status        String
+  resolvedAt    DateTime?
+  resolutionNote String?
+  cweId         String?
+  cvssVector    String?
+  cvssScore     Float?
+  txHash        String?
+  createdAt     DateTime @default(now())
+
+  certificate AuditCertificate @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+
+  @@index([certificateId])
+  @@index([severity, status])
+  @@index([category])
+}
+
+model AuditEvent {
+  id              String   @id @default(cuid())
+  contractAddress String
+  certificateId   String?
+  eventType       String
+  previousScore   Int?
+  newScore        Int?
+  triggerSource   String
+  details         Json?
+  timestamp       DateTime
+  createdAt       DateTime @default(now())
+
+  certificate AuditCertificate? @relation(fields: [certificateId], references: [id])
+
+  @@index([contractAddress, timestamp(sort: Desc)])
+  @@index([eventType])
+  @@index([certificateId])
+}
+
+model Contract {
+  id                 String  @id @default(cuid())
+  address            String  @unique
+  name               String?
+  description        String?
+  abi                Json?
+  functionSignatures Json?
+  isToken            Boolean @default(false)
+  tokenSymbol        String?
+  tokenName          String?
+  tokenDecimals      Int?
+  wasmHash           String?
+  isVerified         Boolean @default(false)
+
+  verificationBadge  String? // gold | silver | bronze | null
+  lastVerifiedAt     DateTime?
+  safetyScore        Int?
+  verifiedProperties Int       @default(0)
+  totalProperties    Int       @default(0)
+  vulnerabilities    Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions     Transaction[]
+  events           Event[]
+  wasmUpgrades     WasmUpgradeHistory[]
+  verificationRuns VerificationRun[]
+  auditCerts       AuditCertificate[]
+
+  @@index([address])
+  @@index([verificationBadge])
+  @@index([safetyScore])
+}
+
+model VerificationRun {
+  id              String    @id @default(cuid())
+  contractAddress String
+  contract        Contract  @relation(fields: [contractAddress], references: [address])
+  status          String    @default("pending") // pending | running | completed | failed
+  badge           String? // gold | silver | bronze
+  safetyScore     Int?
+  report          Json?
+  startedAt       DateTime  @default(now())
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([contractAddress])
+  @@index([status])
+  @@index([safetyScore])
+}
+
 model SessionAuthorization {
   id                String   @id @default(cuid())
   eventId           String   @unique
@@ -199,6 +280,32 @@ model SessionAuthorization {
 
   @@index([contractAddress])
   @@index([expiryLedger])
+}
+
+model DexPool {
+  id              String   @id @default(cuid())
+  address         String   @unique
+  chain           String
+  protocol        String
+  token0          String
+  token1          String
+  reserve0        Decimal  @db.Decimal(30, 7)
+  reserve1        Decimal  @db.Decimal(30, 7)
+  tvl             Decimal  @db.Decimal(30, 7)
+  volume24h       Decimal  @db.Decimal(30, 7)
+  fee             Decimal  @db.Decimal(10, 4)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  priceDevA       PriceDeviation[] @relation("priceDevA")
+  priceDevB       PriceDeviation[] @relation("priceDevB")
+  buyPool         ArbitrageOpportunity[] @relation("buyPool")
+  sellPool        ArbitrageOpportunity[] @relation("sellPool")
+
+  @@index([address])
+  @@index([protocol])
+  @@index([tvl(sort: Desc)])
 }
 
 model VulnerabilityAdvisory {
@@ -236,18 +343,7 @@ model PropagationAnalysis {
   @@index([vulnerableContract])
 }
 
-model DexPool {
-  id             String   @id @default(cuid())
-  address        String   @unique
-  name           String?
-  tvlUsd         Decimal  @default(0)
-  tokenA         String?
-  tokenB         String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
 
-  @@index([address])
-}
 
 model IndexerState {
   id         String   @id @default("singleton")
@@ -1564,76 +1660,7 @@ model TimerAlert {
 // Migration: 20260619000000_arbitrage_intelligence_platform
 // =========================================================================
 
-model DexPool {
-  id              String      @id @default(uuid())
-  contractAddress String      @unique @db.VarChar(56)
-  dexName         String      @db.VarChar(100)
-  poolType        String      @db.VarChar(30)
-  aprPct          Float?
-  feeBps          Int?
-  feeTier         Decimal?    @db.Decimal(5, 4)
-  fees24h         Decimal?    @db.Decimal(30, 0)
-  fees24hUsd      Decimal?
-  firstSeenLedger Int?
-  ilRiskScore     Float?
-  isActive        Boolean     @default(true)
-  lastEventLedger Int?
-  lastSyncedAt    DateTime?
-  pairKey         String?
-  poolAddress     String?     @unique
-  poolPrices      PoolPrice[]
-  priceAUsd       Decimal?
-  priceBUsd       Decimal?
-  protocol        String?
-  reserveA        Decimal?
-  reserveB        Decimal?
-  tokenA          String      @db.VarChar(56)
-  tokenADecimals  Int?
-  tokenASymbol    String?     @db.VarChar(20)
-  tokenB          String      @db.VarChar(56)
-  tokenBDecimals  Int?
-  tokenBSymbol    String?     @db.VarChar(20)
-  totalLiquidity  Decimal?    @db.Decimal(30, 0)
-  tvlUsd          Decimal?
-  volume1hUsd     Decimal?
-  volume24h       Decimal?    @db.Decimal(30, 0)
-  volume24hUsd    Decimal?
-  volume7dUsd     Decimal?
-  volume30dUsd    Decimal?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @default(now())
 
-  priceDevA   PriceDeviation[]       @relation("priceDevA")
-  priceDevB   PriceDeviation[]       @relation("priceDevB")
-  arbBuyOpps  ArbitrageOpportunity[] @relation("buyPool")
-  arbSellOpps ArbitrageOpportunity[] @relation("sellPool")
-
-  @@index([dexName])
-  @@index([tokenA, tokenB])
-  @@index([isActive])
-}
-
-model PoolPrice {
-  id          BigInt   @id @default(autoincrement())
-  poolId      String
-  blockNumber BigInt
-  timestamp   DateTime
-  reserveA    Decimal  @db.Decimal(30, 0)
-  reserveB    Decimal  @db.Decimal(30, 0)
-  spotPrice   Decimal  @db.Decimal(30, 18)
-  twap1m      Decimal? @db.Decimal(30, 18)
-  twap5m      Decimal? @db.Decimal(30, 18)
-  twap1h      Decimal? @db.Decimal(30, 18)
-  vwap        Decimal? @db.Decimal(30, 18)
-  tick        Int?
-  sqrtPrice   Decimal? @db.Decimal(40, 0)
-
-  pool DexPool @relation(fields: [poolId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-
-  @@unique([poolId, blockNumber])
-  @@index([poolId, timestamp])
-  @@index([timestamp])
-}
 
 model PriceDeviation {
   id                  BigInt   @id @default(autoincrement())
@@ -4101,879 +4128,3 @@ model BridgeAlert {
 
 // ─── Arbitrage Intelligence Platform (Issue #ARB) ────────────────────────────
 
-model DexPool {
-  id              String   @id @default(uuid()) @db.Uuid
-  contractAddress String   @unique @map("contract_address") @db.VarChar(56)
-  dexName         String   @map("dex_name") @db.VarChar(100)
-  poolType        String   @map("pool_type") @db.VarChar(30)   // constant_product | stable_swap | weighted_pool | concentrated_liquidity
-  tokenA          String   @map("token_a") @db.VarChar(56)
-  tokenB          String   @map("token_b") @db.VarChar(56)
-  tokenASymbol    String?  @map("token_a_symbol") @db.VarChar(20)
-  tokenBSymbol    String?  @map("token_b_symbol") @db.VarChar(20)
-  feeTier         Decimal? @map("fee_tier") @db.Decimal(5, 4)
-  totalLiquidity  Decimal? @map("total_liquidity") @db.Decimal(30, 0)
-  volume24h       Decimal? @map("volume_24h") @db.Decimal(30, 0)
-  fees24h         Decimal? @map("fees_24h") @db.Decimal(30, 0)
-  isActive        Boolean  @default(true) @map("is_active")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
-
-  poolPrices          PoolPrice[]
-  buyOpportunities    ArbitrageOpportunity[] @relation("BuyPool")
-  sellOpportunities   ArbitrageOpportunity[] @relation("SellPool")
-  priceDeviationsA    PriceDeviation[] @relation("DeviationPoolA")
-  priceDeviationsB    PriceDeviation[] @relation("DeviationPoolB")
-
-  @@index([contractAddress])
-  @@index([dexName])
-  @@index([tokenA, tokenB])
-  @@index([isActive])
-  @@map("dex_pools")
-}
-
-model PoolPrice {
-  id          BigInt   @id @default(autoincrement())
-  poolId      String   @map("pool_id") @db.Uuid
-  blockNumber BigInt   @map("block_number")
-  timestamp   DateTime
-  reserveA    Decimal  @map("reserve_a") @db.Decimal(30, 0)
-  reserveB    Decimal  @map("reserve_b") @db.Decimal(30, 0)
-  spotPrice   Decimal  @map("spot_price") @db.Decimal(30, 18)
-  twap1m      Decimal? @map("twap_1m") @db.Decimal(30, 18)
-  twap5m      Decimal? @map("twap_5m") @db.Decimal(30, 18)
-  twap1h      Decimal? @map("twap_1h") @db.Decimal(30, 18)
-  vwap        Decimal? @db.Decimal(30, 18)
-  tick        Int?
-  sqrtPrice   Decimal? @map("sqrt_price") @db.Decimal(40, 0)
-
-  pool DexPool @relation(fields: [poolId], references: [id])
-
-  @@unique([poolId, blockNumber])
-  @@index([poolId, timestamp(sort: Desc)])
-  @@index([timestamp])
-  @@map("pool_prices")
-}
-
-model PriceDeviation {
-  id                  BigInt   @id @default(autoincrement())
-  tokenA              String   @map("token_a") @db.VarChar(56)
-  tokenB              String   @map("token_b") @db.VarChar(56)
-  poolIdA             String   @map("pool_id_a") @db.Uuid
-  poolIdB             String   @map("pool_id_b") @db.Uuid
-  priceA              Decimal  @map("price_a") @db.Decimal(30, 18)
-  priceB              Decimal  @map("price_b") @db.Decimal(30, 18)
-  deviationPercentage Decimal  @map("deviation_percentage") @db.Decimal(10, 4)
-  timestamp           DateTime
-  blockNumber         BigInt   @map("block_number")
-
-  poolA DexPool @relation("DeviationPoolA", fields: [poolIdA], references: [id])
-  poolB DexPool @relation("DeviationPoolB", fields: [poolIdB], references: [id])
-
-  @@index([tokenA, tokenB, timestamp(sort: Desc)])
-  @@index([deviationPercentage(sort: Desc)])
-  @@index([timestamp])
-  @@map("price_deviations")
-}
-
-model ArbitrageOpportunity {
-  id               String   @id @default(uuid()) @db.Uuid
-  pair             String   @db.VarChar(50)
-  tokenA           String   @map("token_a") @db.VarChar(56)
-  tokenB           String   @map("token_b") @db.VarChar(56)
-  type             String   @db.VarChar(30)   // direct | triangular | multi_hop | cross_pool
-  buyPoolId        String?  @map("buy_pool_id") @db.Uuid
-  sellPoolId       String?  @map("sell_pool_id") @db.Uuid
-  buyPrice         Decimal  @map("buy_price") @db.Decimal(30, 18)
-  sellPrice        Decimal  @map("sell_price") @db.Decimal(30, 18)
-  profitPercentage Decimal  @map("profit_percentage") @db.Decimal(10, 4)
-  profitEstimate   Decimal? @map("profit_estimate") @db.Decimal(30, 0)
-  capitalRequired  Decimal? @map("capital_required") @db.Decimal(30, 0)
-  confidence       Decimal? @db.Decimal(5, 4)
-  route            Json
-  status           String   @default("active") @db.VarChar(20)  // active | expired | executed | invalid
-  detectedAt       DateTime @map("detected_at")
-  expiredAt        DateTime? @map("expired_at")
-  executedAt       DateTime? @map("executed_at")
-  executionTxHash  String?  @map("execution_tx_hash") @db.VarChar(64)
-  createdAt        DateTime @default(now()) @map("created_at")
-
-  buyPool  DexPool? @relation("BuyPool", fields: [buyPoolId], references: [id])
-  sellPool DexPool? @relation("SellPool", fields: [sellPoolId], references: [id])
-  mevScore MevOpportunityScore?
-  executions ArbitrageExecution[]
-
-  @@index([status, detectedAt(sort: Desc)])
-  @@index([pair, status])
-  @@index([type])
-  @@index([profitPercentage(sort: Desc)])
-  @@index([detectedAt(sort: Desc)])
-  @@map("arbitrage_opportunities")
-}
-
-model MevOpportunityScore {
-  id                  String   @id @default(uuid()) @db.Uuid
-  opportunityId       String   @unique @map("opportunity_id") @db.Uuid
-  profitabilityScore  Decimal? @map("profitability_score") @db.Decimal(5, 2)
-  capitalEfficiency   Decimal? @map("capital_efficiency") @db.Decimal(10, 4)
-  speedRequirement    String?  @map("speed_requirement") @db.VarChar(20)  // immediate | fast | moderate | slow
-  competitionLevel    String?  @map("competition_level") @db.VarChar(20)  // low | medium | high | extreme
-  slippageRisk        Decimal? @map("slippage_risk") @db.Decimal(5, 2)
-  frontrunningRisk    Decimal? @map("frontrunning_risk") @db.Decimal(5, 2)
-  overallScore        Decimal? @map("overall_score") @db.Decimal(5, 2)
-  recommendation      String?  @db.VarChar(50)  // execute_immediately | monitor | skip
-  scoredAt            DateTime @default(now()) @map("scored_at")
-
-  opportunity ArbitrageOpportunity @relation(fields: [opportunityId], references: [id])
-
-  @@index([overallScore(sort: Desc)])
-  @@index([recommendation])
-  @@map("mev_opportunity_scores")
-}
-
-model ArbitrageExecution {
-  id                String   @id @default(uuid()) @db.Uuid
-  opportunityId     String   @map("opportunity_id") @db.Uuid
-  searcherAddress   String?  @map("searcher_address") @db.VarChar(56)
-  txHash            String   @map("tx_hash") @db.VarChar(64)
-  blockNumber       BigInt   @map("block_number")
-  capitalUsed       Decimal? @map("capital_used") @db.Decimal(30, 0)
-  grossProfit       Decimal? @map("gross_profit") @db.Decimal(30, 0)
-  gasCost           Decimal? @map("gas_cost") @db.Decimal(30, 0)
-  netProfit         Decimal? @map("net_profit") @db.Decimal(30, 0)
-  executionTimeMs   Int?     @map("execution_time_ms")
-  success           Boolean
-  failureReason     String?  @map("failure_reason")
-  simulationResults Json?    @map("simulation_results")
-  executedAt        DateTime @default(now()) @map("executed_at")
-
-  opportunity ArbitrageOpportunity @relation(fields: [opportunityId], references: [id])
-
-  @@index([opportunityId])
-  @@index([searcherAddress])
-  @@index([success])
-  @@index([executedAt(sort: Desc)])
-  @@map("arbitrage_executions")
-}
-
-model ArbitrageBot {
-  id                 String   @id @default(uuid()) @db.Uuid
-  address            String   @unique @db.VarChar(56)
-  firstSeen          DateTime @map("first_seen")
-  lastSeen           DateTime @map("last_seen")
-  totalTrades        Int      @default(0) @map("total_trades")
-  successfulTrades   Int      @default(0) @map("successful_trades")
-  failedTrades       Int      @default(0) @map("failed_trades")
-  totalProfit        Decimal  @default(0) @map("total_profit") @db.Decimal(30, 0)
-  totalGasSpent      Decimal  @default(0) @map("total_gas_spent") @db.Decimal(30, 0)
-  avgProfitPerTrade  Decimal? @map("avg_profit_per_trade") @db.Decimal(30, 0)
-  successRate        Decimal? @map("success_rate") @db.Decimal(5, 4)
-  preferredPairs     String[] @map("preferred_pairs")
-  preferredDexs      String[] @map("preferred_dexs")
-  avgCapitalPerTrade Decimal? @map("avg_capital_per_trade") @db.Decimal(30, 0)
-  isActive           Boolean  @default(true) @map("is_active")
-  tags               String[]
-  updatedAt          DateTime @updatedAt @map("updated_at")
-
-  @@index([address])
-  @@index([totalProfit(sort: Desc)])
-  @@index([isActive])
-  @@index([lastSeen(sort: Desc)])
-  @@map("arbitrage_bots")
-}
-
-model SandwichAttack {
-  id              String   @id @default(uuid()) @db.Uuid
-  pair            String   @db.VarChar(50)
-  dex             String   @db.VarChar(100)
-  victimTx        String   @map("victim_tx") @db.VarChar(64)
-  victimAddress   String   @map("victim_address") @db.VarChar(56)
-  victimSlippage  Decimal  @map("victim_slippage") @db.Decimal(10, 4)  // percentage
-  victimLoss      Decimal? @map("victim_loss") @db.Decimal(30, 0)
-  attackerAddress String   @map("attacker_address") @db.VarChar(56)
-  attackerProfit  Decimal? @map("attacker_profit") @db.Decimal(30, 0)
-  frontRunTx      String   @map("front_run_tx") @db.VarChar(64)
-  backRunTx       String   @map("back_run_tx") @db.VarChar(64)
-  blockNumber     BigInt   @map("block_number")
-  timestamp       DateTime
-
-  @@index([victimAddress])
-  @@index([attackerAddress])
-  @@index([timestamp(sort: Desc)])
-  @@index([pair])
-  @@map("sandwich_attacks")
-}
-
-model ArbitrageAlert {
-  id              String   @id @default(uuid()) @db.Uuid
-  name            String
-  conditions      Json
-  channels        Json
-  cooldownSeconds Int      @default(30) @map("cooldown_seconds")
-  isActive        Boolean  @default(true) @map("is_active")
-  lastTriggeredAt DateTime? @map("last_triggered_at")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
-
-  @@index([isActive])
-  @@map("arbitrage_alerts")
-}
-// ─── End Arbitrage Intelligence Platform ──────────────────────────────────────
-
-
-// ─── Smart Contract Audit Trail & Certificate Platform ────────────────────────
-
-// Cryptographically signed audit certificate — one per audit run, versioned per contract
-model AuditCertificate {
-  id               String   @id @default(cuid())
-  contractAddress  String
-  version          Int      @default(1)
-  status           String   // "draft" | "published" | "superseded" | "revoked"
-  generatedAt      DateTime
-  expiresAt        DateTime?
-
-  // Composite scores (0–100, higher = healthier)
-  overallScore     Int
-  securityScore    Int
-  governanceScore  Int
-  economicScore    Int
-  complianceScore  Int
-  liquidityScore   Int
-
-  // Cryptographic attestation
-  signatureAlgorithm String  // "ed25519" | "ecdsa-p256"
-  signature          String  // base64-encoded signature
-  publicKey          String  // server's public key for verification
-  certificateHash    String  // SHA-256 hash of canonical certificate payload
-  anchorTxHash       String? // on-chain anchor transaction (if anchored)
-
-  // Finding summary counters
-  totalFindings    Int  @default(0)
-  openFindings     Int  @default(0)
-  criticalFindings Int  @default(0)
-  highFindings     Int  @default(0)
-  mediumFindings   Int  @default(0)
-  lowFindings      Int  @default(0)
-  resolvedFindings Int  @default(0)
-
-  findings Json  // full AuditFinding snapshot at time of cert issuance
-  scores   Json  // all sub-scores and dimension breakdowns
-  metadata Json? // additional metadata (triggeredBy, engine version, etc.)
-
-  createdAt DateTime @default(now())
-
-  auditFindings AuditFinding[]
-  auditEvents   AuditEvent[]
-  contract      Contract? @relation(fields: [contractAddress], references: [address])
-
-  @@unique([contractAddress, version])
-  @@index([contractAddress, status])
-  @@index([overallScore(sort: Desc)])
-  @@index([createdAt(sort: Desc)])
-}
-
-// Individual finding attached to a certificate — queryable, filterable, trackable
-model AuditFinding {
-  id            String   @id @default(cuid())
-  certificateId String
-  category      String   // "vulnerability" | "code_quality" | "governance" | "economics" | "compliance" | "liquidity"
-  severity      String   // "critical" | "high" | "medium" | "low" | "info"
-  title         String
-  description   String
-  detail        String?
-  recommendation String?
-  status        String   // "open" | "resolved" | "wont_fix" | "false_positive"
-  resolvedAt    DateTime?
-  resolutionNote String?
-  cweId         String?  // CWE identifier for vulnerability type
-  cvssVector    String?  // CVSS vector string
-  cvssScore     Float?
-  txHash        String?  // evidence transaction
-  createdAt     DateTime @default(now())
-
-  certificate AuditCertificate @relation(fields: [certificateId], references: [id], onDelete: Cascade)
-
-  @@index([certificateId])
-  @@index([severity, status])
-  @@index([category])
-}
-
-// Append-only audit event log — immutable trail of everything that happened to a contract's audit
-model AuditEvent {
-  id              String   @id @default(cuid())
-  contractAddress String
-  certificateId   String?  // linked certificate if applicable
-  eventType       String   // "initial_audit" | "re_audit" | "upgrade" | "vulnerability_discovered" |
-                           // "score_change" | "certificate_published" | "certificate_revoked" |
-                           // "external_audit_submitted"
-  previousScore   Int?
-  newScore        Int?
-  triggerSource   String   // "scheduled" | "automatic" | "manual" | "external"
-  details         Json?
-  timestamp       DateTime
-  createdAt       DateTime @default(now())
-
-  certificate AuditCertificate? @relation(fields: [certificateId], references: [id])
-
-  @@index([contractAddress, timestamp(sort: Desc)])
-  @@index([eventType])
-  @@index([certificateId])
-}
-
-// External (third-party) audit submission for a contract
-model ExternalAudit {
-  id                     String   @id @default(cuid())
-  contractAddress        String
-  // Link to verified auditor registry (null for unregistered submissions)
-  auditorId              String?
-  auditorName            String
-  auditorVerificationKey String?
-  reportType             String   // "security_audit" | "formal_verification" | "economic_audit"
-  reportUrl              String?
-  reportHash             String?  // SHA-256 of report for tamper-detection
-  reportSignature        String?  // signature over reportHash using auditor's verificationKey
-  findings               Json?
-  overallGrade           String?  // "pass" | "conditional_pass" | "fail"
-  summary                String?  // brief text summary
-  submittedAt            DateTime
-  verifiedAt             DateTime?
-  verificationStatus     String   // "pending" | "verified" | "rejected"
-  rejectionReason        String?
-  // Display on platform
-  isPublic               Boolean  @default(true)
-  createdAt              DateTime @default(now())
-
-  auditor AuditorRegistry? @relation(fields: [auditorId], references: [id])
-
-  @@index([contractAddress])
-  @@index([auditorId])
-  @@index([verificationStatus])
-  @@index([submittedAt(sort: Desc)])
-}
-
-// Alert subscription — notify users when audit state changes for a contract
-model AuditSubscription {
-  id              String   @id @default(cuid())
-  userId          String?
-  contractAddress String
-  alertTypes      String[] // "score_drop" | "new_finding" | "upgrade" | "certificate_update"
-  threshold       Int?     // minimum score-drop magnitude to trigger a score_drop alert
-
-  // Delivery channels — at least one must be configured
-  // email
-  emailAddress    String?
-  // webhook
-  webhookUrl      String?
-  webhookSecret   String?  // HMAC-SHA256 signing secret for webhook payloads
-  // Slack
-  slackWebhookUrl String?
-  slackChannel    String?  // optional channel override e.g. "#audit-alerts"
-
-  isActive        Boolean  @default(true)
-  // Cooldown: don't fire the same alertType more than once per this window (minutes)
-  cooldownMinutes Int      @default(60)
-  lastTriggeredAt DateTime?
-
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  deliveries AuditNotificationDelivery[]
-
-  @@index([userId])
-  @@index([contractAddress])
-  @@index([isActive])
-}
-
-// Delivery log — one row per notification attempt
-model AuditNotificationDelivery {
-  id             String   @id @default(cuid())
-  subscriptionId String
-  alertType      String   // "score_drop" | "new_finding" | "upgrade" | "certificate_update"
-  channel        String   // "email" | "webhook" | "slack"
-  status         String   @default("pending")  // "pending" | "success" | "failed"
-  payload        Json     // the notification payload that was sent
-  httpStatus     Int?     // for webhook / slack
-  responseBody   String?  // first 500 chars
-  errorMsg       String?
-  attempt        Int      @default(1)
-  deliveredAt    DateTime?
-  createdAt      DateTime @default(now())
-
-  subscription AuditSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-
-  @@index([subscriptionId])
-  @@index([status])
-  @@index([createdAt(sort: Desc)])
-}
-
-// Public certificate verification log — every verification attempt recorded
-model AuditVerificationRecord {
-  id              String   @id @default(cuid())
-  certificateHash String
-  verifierIp      String?
-  verifierKey     String?
-  result          String   // "valid" | "invalid" | "expired" | "revoked"
-  checkedAt       DateTime @default(now())
-
-  @@index([certificateHash])
-  @@index([checkedAt(sort: Desc)])
-}
-
-// ── Auditor Registry ──────────────────────────────────────────────────────────
-
-// Registered and verified third-party audit firms
-model AuditorRegistry {
-  id                  String   @id @default(cuid())
-  name                String   @unique  // "CertiK" | "Trail of Bits" | etc.
-  slug                String   @unique  // url-safe slug, e.g. "certik"
-  website             String?
-  logoUrl             String?
-  description         String?
-  // Contact and identity
-  contactEmail        String?
-  twitterHandle       String?
-  githubOrg           String?
-  // Verification
-  verificationKey     String?  @unique  // Ed25519 / ECDSA public key for signature verification
-  verificationKeyAlgo String?           // "ed25519" | "ecdsa-p256"
-  isVerified          Boolean  @default(false)
-  verifiedAt          DateTime?
-  verifiedBy          String?           // admin key or address that verified
-  // Trust metrics
-  trustScore          Int      @default(50)  // 0-100
-  totalAudits         Int      @default(0)
-  acceptedAudits      Int      @default(0)
-  rejectedAudits      Int      @default(0)
-  // Badge
-  badgeTier           String?           // "platinum" | "gold" | "silver" | "bronze" | null
-  specializations     String[]          // "defi" | "nft" | "bridge" | "staking" | etc.
-  // Status
-  isActive            Boolean  @default(true)
-  suspendedAt         DateTime?
-  suspendReason       String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-
-  submissions ExternalAudit[]
-
-  @@index([isVerified])
-  @@index([trustScore(sort: Desc)])
-  @@index([slug])
-}
-
-// ─── Formal Verification Integration ─────────────────────────────────────────
-
-// Supported formal verification tools
-enum FormalVerifTool {
-  certora       // Certora Prover (spec-based deductive verification)
-  scribble      // Scribble (annotation-based runtime verification)
-  halo2         // Halo2 ZK proof framework
-  smtchecker    // SMT-based bounded model checking
-  manual        // Human-submitted formal verification report
-}
-
-model FormalVerificationJob {
-  id               String           @id @default(cuid())
-  contractAddress  String
-  tool             FormalVerifTool
-  status           String           @default("pending")
-  // "pending" | "running" | "passed" | "failed" | "timeout" | "unsupported"
-
-  // Input
-  sourceJobId      String?          // linked VerificationJob (source code)
-  specContent      String?          // tool-specific spec / annotation file content
-  specFileName     String?
-  toolVersion      String?
-  toolOptions      Json?            // extra tool-specific options
-
-  // Results
-  passed           Boolean?
-  propertyCount    Int?             // total properties / rules checked
-  provenCount      Int?             // properties formally proven
-  violatedCount    Int?             // properties with counter-examples
-  unknownCount     Int?             // timeouts / out-of-scope
-  counterExamples  Json?            // [{property, trace, description}]
-  coveragePercent  Float?           // 0-100 bytecode / source coverage
-  toolOutput       String?          // raw stdout/stderr (truncated at 10 KB)
-  reportUrl        String?          // link to external tool dashboard
-
-  // Timing
-  startedAt        DateTime?
-  completedAt      DateTime?
-  durationSeconds  Int?
-
-  // Audit integration
-  certId           String?          // linked AuditCertificate id (once published)
-  triggeredBy      String           @default("manual")
-
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  @@index([contractAddress])
-  @@index([tool])
-  @@index([status])
-  @@index([createdAt(sort: Desc)])
-model MonitoredAddress {
-  id              String   @id @default(uuid())
-  address         String   @db.VarChar(100)
-  chain           String   @db.VarChar(50)
-  label           String?
-  minAlertUsd     Decimal? @db.Decimal(20, 2)
-  alertOnTx       Boolean  @default(true)
-  alertOnBridging Boolean  @default(true)
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@unique([address, chain])
-  @@index([address])
-  @@index([chain])
-  @@map("monitored_addresses")
-}
-
-model BridgeVolume {
-  id          String   @id @default(uuid())
-  protocol    String   @db.VarChar(50)
-  chain       String   @db.VarChar(50)
-  asset       String   @db.VarChar(50)
-  volume      Decimal  @db.Decimal(30, 7)
-  count       Int      @default(0)
-  period      String   @db.VarChar(20)
-  periodStart DateTime
-  createdAt   DateTime @default(now())
-
-  @@unique([protocol, chain, asset, period, periodStart])
-  @@index([protocol, period])
-  @@index([chain, period])
-  @@index([periodStart])
-  @@map("bridge_volumes")
-}
-
-// ── Auth models ───────────────────────────────────────────────────────────────
-
-model WalletUser {
-  id          String    @id @default(cuid())
-  address     String    @unique
-  role        String    @default("user")
-  tier        String    @default("free")
-  displayName String?
-  email       String?
-  avatarUrl   String?
-  isActive    Boolean   @default(true)
-  isMultiSig  Boolean   @default(false)
-  metadata    Json      @default("{}")
-  lastLogin   DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  sessions AuthSession[]
-  events   AuthEvent[]
-  webhooks AuthWebhook[]
-
-  @@index([address])
-  @@map("wallet_users")
-}
-
-model AuthSession {
-  id               String    @id
-  userId           String
-  tokenHash        String
-  refreshTokenHash String
-  deviceInfo       Json?
-  appId            String?
-  isActive         Boolean   @default(true)
-  revokedAt        DateTime?
-  revocationReason String?
-  lastActivity     DateTime  @default(now())
-  expiresAt        DateTime
-  createdAt        DateTime  @default(now())
-
-  user WalletUser @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([tokenHash])
-  @@index([refreshTokenHash])
-  @@map("auth_sessions")
-}
-
-model AuthEvent {
-  id        String   @id @default(cuid())
-  userId    String
-  sessionId String?
-  eventType String
-  ipAddress String?
-  userAgent String?
-  metadata  Json?
-  createdAt DateTime @default(now())
-
-  user WalletUser @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([eventType])
-  @@index([createdAt])
-  @@map("auth_events")
-}
-
-model AuthWebhook {
-  id        String   @id @default(cuid())
-  userId    String
-  url       String
-  events    Json
-  secret    String
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-
-  user WalletUser @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@map("auth_webhooks")
-}
-
-model MultiSigWallet {
-  id            String   @id @default(cuid())
-  walletAddress String   @unique
-  signers       Json
-  threshold     Int
-  description   String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  @@map("multisig_wallets")
-}
-
-model OAuthApp {
-  id           String   @id @default(cuid())
-  clientId     String   @unique
-  clientSecret String
-  name         String
-  redirectUris Json
-  scopes       Json
-  ownerId      String
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-
-  @@index([ownerId])
-  @@map("oauth_apps")
-}
-
-model OAuthCode {
-  id          String   @id @default(cuid())
-  code        String   @unique
-  clientId    String
-  userId      String
-  redirectUri String
-  scopes      Json
-  used        Boolean  @default(false)
-  expiresAt   DateTime
-  createdAt   DateTime @default(now())
-
-  @@index([clientId])
-  @@index([userId])
-  @@map("oauth_codes")
-}
-
-// ── Universal ABI Extraction (#289) ──────────────────────────────────────────
-
-model WasmAbiExtract {
-  id              String   @id @default(cuid())
-  contractAddress String   @unique
-  source          String // on-chain-spec | inferred | sep-matched | generic | manual
-  functions       Json // ExtractedFunction[]
-  exports         Json // WasmExport[]
-  imports         Json // WasmImport[]
-  sepStandards    String[]
-  coverageScore   Float    @default(0)
-  warnings        String[]
-  wasmHash        String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@index([contractAddress])
-  @@index([source])
-  @@map("wasm_abi_extracts")
-}
-
-model AbiCoverageReport {
-  id                   String   @id @default(cuid())
-  contractAddress      String
-  totalCalls           Int
-  matchedCalls         Int
-  coveragePercent      Float
-  falsePositives       String[]
-  falseNegatives       String[]
-  confidenceByFunction Json
-  createdAt            DateTime @default(now())
-
-  @@index([contractAddress])
-  @@index([createdAt])
-  @@map("abi_coverage_reports")
-}
-
-model AbiCommunityContribution {
-  id           String   @id @default(cuid())
-  address      String
-  functionName String
-  params       Json
-  returns      String
-  contributor  String?
-  approved     Boolean  @default(false)
-  createdAt    DateTime @default(now())
-
-  @@index([address])
-  @@map("abi_community_contributions")
-}
-
-
-// ============================================================================
-// Fiat On/Off-Ramp Gateway (#fiat-ramp)
-// ============================================================================
-
-/// Universal KYC record — one per user, shared across all ramp providers.
-model RampKycRecord {
-  id                String    @id @default(cuid())
-  userId            String    @unique
-  /// tier1 = email+phone only ($0–$1k/day)
-  /// tier2 = ID verification ($1k–$10k/day)
-  /// tier3 = full KYC + source of funds ($10k+/day)
-  tier              String    @default("tier1")
-  /// pending | submitted | approved | rejected | expired
-  status            String    @default("pending")
-  documentType      String?
-  documentCountry   String?
-  livenessScore     Float?
-  pepScreened       Boolean   @default(false)
-  sanctionsScreened Boolean   @default(false)
-  verifiedAt        DateTime?
-  expiresAt         DateTime?
-  /// Map of provider name → provider-side KYC session/customer ID
-  providerKycIds    Json      @default("{}")
-  dailyLimitUsd     Float     @default(1000)
-  monthlyLimitUsd   Float     @default(10000)
-  dailyUsedUsd      Float     @default(0)
-  monthlyUsedUsd    Float     @default(0)
-  usageResetAt      DateTime?
-  jurisdiction      String?
-  blocked           Boolean   @default(false)
-  blockReason       String?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-
-  orders RampOrder[]
-
-  @@index([status])
-  @@index([tier])
-  @@index([jurisdiction])
-  @@map("ramp_kyc_records")
-}
-
-/// Full lifecycle of a single fiat ↔ crypto ramp order.
-model RampOrder {
-  id              String    @id @default(cuid())
-  userId          String
-  kycId           String?
-  /// buy | sell
-  direction       String
-  provider        String
-  providerOrderId String?
-  /// pending | processing | completed | failed | refunded | cancelled
-  status          String    @default("pending")
-  fiatAmount      Float
-  fiatCurrency    String    @default("USD")
-  cryptoAmount    Float?
-  cryptoAsset     String
-  walletAddress   String
-  paymentMethod   String
-  exchangeRate    Float?
-  platformFeeUsd  Float     @default(0)
-  providerFeeUsd  Float     @default(0)
-  networkFeeUsd   Float     @default(0)
-  totalCostUsd    Float     @default(0)
-  txHash          String?
-  refundAmount    Float?
-  refundStatus    String?
-  refundedAt      DateTime?
-  userIp          String?
-  userCountry     String?
-  metadata        Json      @default("{}")
-  completedAt     DateTime?
-  failedAt        DateTime?
-  failureReason   String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  kyc    RampKycRecord? @relation(fields: [kycId], references: [id])
-  events RampOrderEvent[]
-
-  @@index([userId])
-  @@index([status])
-  @@index([provider])
-  @@index([providerOrderId])
-  @@index([direction])
-  @@index([createdAt(sort: Desc)])
-  @@index([userId, status])
-  @@map("ramp_orders")
-}
-
-/// Immutable audit log — one row per order state change.
-model RampOrderEvent {
-  id          String   @id @default(cuid())
-  orderId     String
-  fromStatus  String?
-  toStatus    String
-  triggeredBy String   @default("system")
-  payload     Json     @default("{}")
-  createdAt   DateTime @default(now())
-
-  order RampOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-
-  @@index([orderId])
-  @@index([createdAt])
-  @@map("ramp_order_events")
-}
-
-/// Daily provider reconciliation run results.
-model RampReconciliation {
-  id               String    @id @default(cuid())
-  provider         String
-  /// YYYY-MM-DD
-  periodDate       String
-  /// pending | running | completed | failed
-  status           String    @default("pending")
-  ordersChecked    Int       @default(0)
-  discrepancyCount Int       @default(0)
-  discrepancies    Json      @default("[]")
-  totalVolumeUsd   Float     @default(0)
-  errorRate        Float     @default(0)
-  runAt            DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-
-  @@unique([provider, periodDate])
-  @@index([status])
-  @@index([provider])
-  @@map("ramp_reconciliations")
-}
-
-/// AML monitoring alert raised against a user or order.
-model RampAmlFlag {
-  id          String    @id @default(cuid())
-  userId      String
-  orderId     String?
-  /// structuring | rapid_in_out | high_risk_jurisdiction | large_single | velocity
-  flagType    String
-  /// low | medium | high | critical
-  severity    String    @default("medium")
-  description String
-  metadata    Json      @default("{}")
-  resolved    Boolean   @default(false)
-  resolvedBy  String?
-  resolvedAt  DateTime?
-  createdAt   DateTime  @default(now())
-
-  @@index([userId])
-  @@index([orderId])
-  @@index([flagType])
-  @@index([resolved])
-  @@index([createdAt(sort: Desc)])
-  @@map("ramp_aml_flags")
-}
-// ─── End Formal Verification Integration ─────────────────────────────────────
