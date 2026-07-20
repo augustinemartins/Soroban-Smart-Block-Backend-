@@ -284,16 +284,40 @@ model SessionAuthorization {
 
 model DexPool {
   id              String   @id @default(cuid())
-  address         String   @unique
+  poolAddress     String   @unique
   chain           String
   protocol        String
-  token0          String
-  token1          String
-  reserve0        Decimal  @db.Decimal(30, 7)
-  reserve1        Decimal  @db.Decimal(30, 7)
-  tvl             Decimal  @db.Decimal(30, 7)
-  volume24h       Decimal  @db.Decimal(30, 7)
-  fee             Decimal  @db.Decimal(10, 4)
+  poolType        String   // "constant_product" | "stable" | "concentrated"
+  feeBps          Int      // fee in basis points
+
+  // Token A
+  tokenA          String
+  tokenASymbol    String
+  tokenADecimals  Int
+  reserveA        Decimal  @db.Decimal(30, 7)
+
+  // Token B
+  tokenB          String
+  tokenBSymbol    String
+  tokenBDecimals  Int
+  reserveB        Decimal  @db.Decimal(30, 7)
+
+  // Price data
+  priceAUsd       Float?
+  priceBUsd       Float?
+
+  // Metrics
+  tvlUsd          Float?
+  volume1hUsd     Float?
+  volume24hUsd    Float?
+  volume7dUsd     Float?
+  volume30dUsd    Float?
+  fees24hUsd      Float?
+  aprPct          Float?
+  ilRiskScore     Float?
+
+  lastSyncedAt    DateTime?
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -303,9 +327,9 @@ model DexPool {
   buyPool         ArbitrageOpportunity[] @relation("buyPool")
   sellPool        ArbitrageOpportunity[] @relation("sellPool")
 
-  @@index([address])
+  @@index([poolAddress])
   @@index([protocol])
-  @@index([tvl(sort: Desc)])
+  @@index([tvlUsd(sort: Desc)])
 }
 
 model VulnerabilityAdvisory {
