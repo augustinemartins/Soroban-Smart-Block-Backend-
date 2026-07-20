@@ -40,6 +40,28 @@ import { marketRouter } from './market';
 import { tokenPricesRouter } from './token-prices';
 import { portfolioRouter } from './portfolio';
 import { exportsRouter } from './exports';
+import { syncStateRouter } from './sync-state';
+import { yieldDistributionRouter } from './yield-distribution';
+import { yieldRouter } from './yield';
+import { dtccSettlementRouter } from './dtcc-settlement';
+import { commodityComplianceRouter } from './commodity-compliance';
+import { settlementBatchRouter } from './settlement-batch';
+import { governanceRouter } from './governance';
+import { systemicRouter } from './systemic';
+import { benchmarkRouter } from './benchmarks';
+import { networkRouter } from './network';
+import { emergencyBaseRouter } from './emergency-router';
+import { stellarRouter } from './stellar';
+import { privacyRouter } from './privacy';
+import { mevRouter } from './mev';
+import { developerRouter } from './developer/router';
+import { scheduleRouter } from './schedule';
+import feedRouter from './feed';
+import backfillRouter from './backfill';
+import marketRouter from './market';
+import feedSSERouter from './feedSSE';
+import { arbitrageRouter } from './arbitrage';
+import { auditRouter } from './audit';
 import { rateLimitAdminRouter } from './rate-limits';
 import { alertsRouter } from './alerts';
 import { oracleIntelligenceRouter } from './oracle-intelligence';
@@ -49,6 +71,7 @@ import { adminErrorsRouter } from './admin/errors';
 // ── CSV Exports ───────────────────────────────────────────────────────────────
 import { requireApiKey, requireKeyTier } from '../middleware/apiKeyAuth';
 import { compilerRouter } from './compiler-router';
+import { sandboxRouter } from './sandbox';
 
 // ── MEV / Sandwich Detection (#290) ──────────────────────────────────────────
 
@@ -72,6 +95,7 @@ router.use('/simulate', requireApiKey, simulateRouter);
 router.use('/verify', requireApiKey, verifyRouter);
 // compiler endpoints require developer+ tier (expensive builds)
 router.use('/compiler', requireKeyTier('developer'), compilerRouter);
+router.use('/sandbox', sandboxRouter);
 router.use('/sync-state', syncStateRouter);
 router.use('/network', networkRouter);
 router.use('/token-metadata', tokenMetadataRouter);
@@ -108,6 +132,10 @@ router.use('/admin/errors', adminErrorsRouter);
 import { bridgeTrackerRouter } from './bridge-tracker';
 router.use('/bridge-tracker', bridgeTrackerRouter);
 
+// ── ZKP Verification History ──────────────────────────────────────────────────
+import { zkpVerificationsRouter } from './zkp-verifications';
+router.use('/zkp-verifications', zkpVerificationsRouter);
+
 // ── Admin ──────────────────────────────────────────────────────────────────────
 import { adminRouter } from './admin';
 router.use('/admin', adminRouter);
@@ -129,7 +157,21 @@ import { governanceTreasuryRouter } from './governance-treasury';
 router.use('/governance/treasury', governanceTreasuryRouter);
 import { governanceRouter } from './governance';
 router.use('/governance', governanceRouter);
-
-// ── Contract Dependency Graph (#574) ───────────────────────────────────────────
-import { graphRouter } from './graph';
-router.use('/graph', graphRouter);
+router.use('/systemic', systemicRouter);
+router.use('/benchmarks', benchmarkRouter);
+router.use('/network', networkRouter);
+router.use('/emergency', emergencyBaseRouter);
+router.use('/stellar', stellarRouter);
+router.use('/privacy', privacyRouter);
+router.use('/mev', mevRouter);
+router.use('/developer', developerRouter);
+router.use('/schedule', scheduleRouter);
+// Data Mesh Platform APIs
+router.use('/feed', feedRouter);
+router.use('/feed/backfill', backfillRouter);
+router.use('/feed/sse', feedSSERouter);
+router.use('/market', marketRouter);
+// Arbitrage Intelligence Platform
+router.use('/arbitrage', arbitrageRouter);
+// Smart Contract Audit Trail & Certificate Platform
+router.use('/audit', auditRouter);
