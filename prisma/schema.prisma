@@ -3631,3 +3631,22 @@ model NftMarketplace {
 
   @@index([isActive])
 }
+
+// ── Supply-chain graph (issue #300) ──────────────────────────────────────────
+model ContractDependency {
+  id            String   @id @default(cuid())
+  /// The contract that calls / depends on another contract.
+  sourceAddress String   @db.VarChar(56)
+  /// The contract being called / depended upon.
+  targetAddress String   @db.VarChar(56)
+  /// False once a dependency is known to have been removed or superseded.
+  isActive      Boolean  @default(true)
+  /// Optional metadata (call site, version, etc.) stored as JSON.
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([sourceAddress, targetAddress])
+  @@index([sourceAddress, isActive])
+  @@index([targetAddress, isActive])
+}
