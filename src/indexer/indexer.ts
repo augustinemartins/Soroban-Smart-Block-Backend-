@@ -1,5 +1,5 @@
 import WebSocket from 'ws';
-import { prismaWrite as prisma } from '../db';
+import { prismaRead, prismaWrite } from '../db';
 import { config } from '../config';
 import {
   fetchEvents,
@@ -22,7 +22,7 @@ const WORKERS = config.indexerCatchupWorkers;
 // ---------------------------------------------------------------------------
 
 export async function getLastIndexedLedger(): Promise<number> {
-  const state = await prisma.indexerState.upsert({
+  const state = await prismaWrite.indexerState.upsert({
     where: { id: 'singleton' },
     update: {},
     create: { id: 'singleton', lastLedger: config.indexerStartLedger },
@@ -31,7 +31,7 @@ export async function getLastIndexedLedger(): Promise<number> {
 }
 
 export async function setLastIndexedLedger(ledger: number): Promise<void> {
-  await prisma.indexerState.upsert({
+  await prismaWrite.indexerState.upsert({
     where: { id: 'singleton' },
     update: { lastLedger: ledger },
     create: { id: 'singleton', lastLedger: ledger },
@@ -41,37 +41,37 @@ export async function setLastIndexedLedger(ledger: number): Promise<void> {
 export async function rollbackLedgers(sequences: number[]) {
   console.log(`⚠️ Rollback triggered for ledgers: ${sequences.join(', ')}`);
 
-  await prisma.$transaction([
+  await prismaWrite.$transaction([
     // Delete SessionAuthorizations related to these ledgers
-    prisma.sessionAuthorization.deleteMany({
+    prismaWrite.sessionAuthorization.deleteMany({
       where: {
         startLedger: { in: sequences },
       },
     }),
 
     // Delete Events for these ledgers
-    prisma.event.deleteMany({
+    prismaWrite.event.deleteMany({
       where: {
         ledgerSequence: { in: sequences },
       },
     }),
 
     // Delete Transactions for these ledgers
-    prisma.transaction.deleteMany({
+    prismaWrite.transaction.deleteMany({
       where: {
         ledgerSequence: { in: sequences },
       },
     }),
 
     // Delete WasmUpgradeHistory for these ledgers
-    prisma.wasmUpgradeHistory.deleteMany({
+    prismaWrite.wasmUpgradeHistory.deleteMany({
       where: {
         ledgerSequence: { in: sequences },
       },
     }),
 
     // Delete Ledgers themselves
-    prisma.ledger.deleteMany({
+    prismaWrite.ledger.deleteMany({
       where: {
         sequence: { in: sequences },
       },
@@ -88,13 +88,13 @@ export async function processLedgerRange(start: number, end: number) {
 
     // Reorg check
     const prevSeq = seq - 1;
-    const prevLedger = await prisma.ledger.findUnique({ where: { sequence: prevSeq } });
+    const prevLedger = await prismaRead.ledger.findUnique({ where: { sequence: prevSeq } });
     if (prevLedger && prevLedger.hash !== ledgerMeta.previousLedgerHash) {
       console.warn(
         `🚨 REORG DETECTED at ledger ${seq}! Expected prev hash ${prevLedger.hash}, but network says ${ledgerMeta.previousLedgerHash}`,
       );
 
-      await prisma.reorgEvent.create({
+      await prismaWrite.reorgEvent.create({
         data: {
           ledgerSequence: seq,
           expectedHash: prevLedger.hash,
@@ -111,7 +111,7 @@ export async function processLedgerRange(start: number, end: number) {
     }
 
     // Save/upsert Ledger record
-    await prisma.ledger.upsert({
+    await prismaWrite.ledger.upsert({
       where: { sequence: seq },
       update: {
         hash: ledgerMeta.hash,
@@ -133,13 +133,13 @@ export async function processLedgerRange(start: number, end: number) {
   const events = await fetchEvents(start, end);
 
   for (const event of events) {
-    await prisma.contract.upsert({
+    await prismaWrite.contract.upsert({
       where: { address: event.contractId },
       update: {},
       create: { address: event.contractId },
     });
 
-    const existingTx = await prisma.transaction.findUnique({
+    const existingTx = await prismaRead.transaction.findUnique({
       where: { hash: event.transactionHash },
     });
     if (!existingTx) {
@@ -156,7 +156,7 @@ export async function processLedgerRange(start: number, end: number) {
             humanReadable: null,
           };
 
-      const transaction = await prisma.transaction.upsert({
+      const transaction = await prismaWrite.transaction.upsert({
         where: { hash: event.transactionHash },
         update: {},
         create: {
@@ -197,7 +197,7 @@ export async function processLedgerRange(start: number, end: number) {
     // when a single transaction emits multiple events with the same first topic.
     const positionKey = event.pagingToken || `${event.ledgerSequence}-${events.indexOf(event)}`;
     const eventId = `${event.transactionHash}-${positionKey}`;
-    const savedEvent = await prisma.event.upsert({
+    const savedEvent = await prismaWrite.event.upsert({
       where: { id: eventId },
       update: {},
       create: {
@@ -280,7 +280,7 @@ async function processSessionAuthorization(
 
   const allocatedBlocks = Math.max(0, expiryLedger - startLedger);
 
-  await prisma.sessionAuthorization.upsert({
+  await prismaWrite.sessionAuthorization.upsert({
     where: { eventId },
     update: {
       hotSigner,
@@ -473,7 +473,7 @@ export class SorobanEventWorker {
           );
 
           // Record LedgerGap in the database
-          await prisma.ledgerGap.create({
+          await prismaWrite.ledgerGap.create({
             data: {
               startSequence: gapStart,
               endSequence: gapEnd,
@@ -492,7 +492,7 @@ export class SorobanEventWorker {
             }
 
             // Mark the gap as resolved
-            await prisma.ledgerGap.updateMany({
+            await prismaWrite.ledgerGap.updateMany({
               where: {
                 startSequence: gapStart,
                 endSequence: gapEnd,
