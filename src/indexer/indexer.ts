@@ -1,5 +1,5 @@
 import WebSocket from 'ws';
-import { prismaWrite as prisma } from '../db';
+import { prismaRead, prismaWrite } from '../db';
 import { config } from '../config';
 import {
   fetchEvents,
@@ -8,6 +8,7 @@ import {
   getTransaction,
   getTransactionFromHorizon,
   type LedgerEvent,
+  fetchLedgerMetadata,
 } from './rpc';
 import { decodeTransaction, decodeEvent } from './decoder';
 import { processAaTransaction } from './aa-indexer';
@@ -20,8 +21,8 @@ const WORKERS = config.indexerCatchupWorkers;
 // IndexerState helpers
 // ---------------------------------------------------------------------------
 
-async function getLastIndexedLedger(): Promise<number> {
-  const state = await prisma.indexerState.upsert({
+export async function getLastIndexedLedger(): Promise<number> {
+  const state = await prismaWrite.indexerState.upsert({
     where: { id: 'singleton' },
     update: {},
     create: { id: 'singleton', lastLedger: config.indexerStartLedger },
@@ -29,26 +30,116 @@ async function getLastIndexedLedger(): Promise<number> {
   return state.lastLedger;
 }
 
-async function setLastIndexedLedger(ledger: number): Promise<void> {
-  await prisma.indexerState.upsert({
+export async function setLastIndexedLedger(ledger: number): Promise<void> {
+  await prismaWrite.indexerState.upsert({
     where: { id: 'singleton' },
     update: { lastLedger: ledger },
     create: { id: 'singleton', lastLedger: ledger },
   });
 }
 
-async function processLedgerRange(start: number, end: number) {
+export async function rollbackLedgers(sequences: number[]) {
+  console.log(`⚠️ Rollback triggered for ledgers: ${sequences.join(', ')}`);
+
+  await prismaWrite.$transaction([
+    // Delete SessionAuthorizations related to these ledgers
+    prismaWrite.sessionAuthorization.deleteMany({
+      where: {
+        startLedger: { in: sequences },
+      },
+    }),
+
+    // Delete Events for these ledgers
+    prismaWrite.event.deleteMany({
+      where: {
+        ledgerSequence: { in: sequences },
+      },
+    }),
+
+    // Delete Transactions for these ledgers
+    prismaWrite.transaction.deleteMany({
+      where: {
+        ledgerSequence: { in: sequences },
+      },
+    }),
+
+    // Delete WasmUpgradeHistory for these ledgers
+    prismaWrite.wasmUpgradeHistory.deleteMany({
+      where: {
+        ledgerSequence: { in: sequences },
+      },
+    }),
+
+    // Delete Ledgers themselves
+    prismaWrite.ledger.deleteMany({
+      where: {
+        sequence: { in: sequences },
+      },
+    }),
+  ]);
+}
+
+export async function processLedgerRange(start: number, end: number) {
   console.log(`Indexing ledgers ${start} → ${end}`);
+
+  // 1. Fetch metadata and check reorgs sequentially for all ledgers in the range first
+  for (let seq = start; seq <= end; seq++) {
+    const ledgerMeta = await fetchLedgerMetadata(seq);
+
+    // Reorg check
+    const prevSeq = seq - 1;
+    const prevLedger = await prismaRead.ledger.findUnique({ where: { sequence: prevSeq } });
+    if (prevLedger && prevLedger.hash !== ledgerMeta.previousLedgerHash) {
+      console.warn(
+        `🚨 REORG DETECTED at ledger ${seq}! Expected prev hash ${prevLedger.hash}, but network says ${ledgerMeta.previousLedgerHash}`,
+      );
+
+      await prismaWrite.reorgEvent.create({
+        data: {
+          ledgerSequence: seq,
+          expectedHash: prevLedger.hash,
+          actualHash: ledgerMeta.previousLedgerHash,
+          previousHash: prevLedger.previousLedgerHash ?? '',
+          rolledBackLedgers: [prevSeq],
+        },
+      });
+
+      await rollbackLedgers([prevSeq]);
+      await setLastIndexedLedger(prevSeq - 1);
+
+      throw new Error(`Reorg detected at ledger ${seq}. Rolled back ${prevSeq}.`);
+    }
+
+    // Save/upsert Ledger record
+    await prismaWrite.ledger.upsert({
+      where: { sequence: seq },
+      update: {
+        hash: ledgerMeta.hash,
+        previousLedgerHash: ledgerMeta.previousLedgerHash,
+        closeTime: ledgerMeta.closeTime,
+        txCount: ledgerMeta.txCount,
+      },
+      create: {
+        sequence: seq,
+        hash: ledgerMeta.hash,
+        previousLedgerHash: ledgerMeta.previousLedgerHash,
+        closeTime: ledgerMeta.closeTime,
+        txCount: ledgerMeta.txCount,
+      },
+    });
+  }
+
+  // 2. Fetch events for the range and process them normally
   const events = await fetchEvents(start, end);
 
   for (const event of events) {
-    await prisma.contract.upsert({
+    await prismaWrite.contract.upsert({
       where: { address: event.contractId },
       update: {},
       create: { address: event.contractId },
     });
 
-    const existingTx = await prisma.transaction.findUnique({
+    const existingTx = await prismaRead.transaction.findUnique({
       where: { hash: event.transactionHash },
     });
     if (!existingTx) {
@@ -65,7 +156,7 @@ async function processLedgerRange(start: number, end: number) {
             humanReadable: null,
           };
 
-      const transaction = await prisma.transaction.upsert({
+      const transaction = await prismaWrite.transaction.upsert({
         where: { hash: event.transactionHash },
         update: {},
         create: {
@@ -102,8 +193,11 @@ async function processLedgerRange(start: number, end: number) {
     }
 
     const { eventType, decoded } = decodeEvent(event.topics, event.data);
-    const eventId = `${event.transactionHash}-${event.topics[0] ?? '0'}`;
-    const savedEvent = await prisma.event.upsert({
+    // Include paging token (unique per event position) to prevent ID collisions
+    // when a single transaction emits multiple events with the same first topic.
+    const positionKey = event.pagingToken || `${event.ledgerSequence}-${events.indexOf(event)}`;
+    const eventId = `${event.transactionHash}-${positionKey}`;
+    const savedEvent = await prismaWrite.event.upsert({
       where: { id: eventId },
       update: {},
       create: {
@@ -186,7 +280,7 @@ async function processSessionAuthorization(
 
   const allocatedBlocks = Math.max(0, expiryLedger - startLedger);
 
-  await prisma.sessionAuthorization.upsert({
+  await prismaWrite.sessionAuthorization.upsert({
     where: { eventId },
     update: {
       hotSigner,
@@ -323,7 +417,7 @@ export function stopIndexerService(): void {
   }
 }
 
-class SorobanEventWorker {
+export class SorobanEventWorker {
   private websocket?: WebSocket;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private reconnectDelayMs = 1000;
@@ -369,6 +463,54 @@ class SorobanEventWorker {
       while (true) {
         const last = await getLastIndexedLedger();
         if (last >= targetLedger) return;
+
+        // --- GAP DETECTION & BACKFILL ---
+        if (last < targetLedger - 1) {
+          const gapStart = last + 1;
+          const gapEnd = targetLedger - 1;
+          console.warn(
+            `⚠️ Ledger gap detected: expected next ledger to be ${targetLedger}, but last indexed is ${last}. Gap range: ${gapStart} → ${gapEnd}`,
+          );
+
+          // Record LedgerGap in the database
+          await prismaWrite.ledgerGap.create({
+            data: {
+              startSequence: gapStart,
+              endSequence: gapEnd,
+              resolved: false,
+            },
+          });
+
+          // Attempt to backfill the gap
+          try {
+            console.log(`🔄 Attempting to backfill gap ${gapStart} → ${gapEnd}...`);
+            if (gapEnd - gapStart >= BATCH && WORKERS > 1) {
+              await catchUp(gapStart, gapEnd);
+            } else {
+              await processLedgerRange(gapStart, gapEnd);
+              await setLastIndexedLedger(gapEnd);
+            }
+
+            // Mark the gap as resolved
+            await prismaWrite.ledgerGap.updateMany({
+              where: {
+                startSequence: gapStart,
+                endSequence: gapEnd,
+                resolved: false,
+              },
+              data: { resolved: true },
+            });
+            console.log(
+              `✅ Ledger gap ${gapStart} → ${gapEnd} successfully backfilled and resolved.`,
+            );
+          } catch (backfillErr) {
+            console.error(`❌ Failed to backfill ledger gap ${gapStart} → ${gapEnd}:`, backfillErr);
+            throw backfillErr;
+          }
+
+          // Refresh last indexed ledger after backfill
+          continue;
+        }
 
         const gap = targetLedger - last;
         if (gap > BATCH && WORKERS > 1) {
